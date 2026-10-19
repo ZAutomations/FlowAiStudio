@@ -67,7 +67,28 @@ def studio(payload, settings, cancel, animated=False, emit=event):
     for sub in ('', 'images', 'voice', 'clips'):
         (project / sub).mkdir(parents=True, exist_ok=True)
     saved = read(project / 'project.json')
+    if animated and payload.get('action') == 'import-ready-animation':
+        from ai_studio_animate_prompts import parse_ready
+        from ai_studio_pipeline import fingerprint
+        if any(s.get('image_path') or s.get('video_path') or s.get('audio_path') for s in saved.get('scenes',[])) or (project/'animate_media.json').exists():
+            raise ValueError('Import a ready story into a new empty Animate project; existing generated assets are preserved.')
+        ready=parse_ready(payload.get('animation_ready',''),payload.get('ready_original_script',''))
+        payload.update(ready['options'],title=ready['title'] or payload.get('title','Animate story'),script=ready['script'],scene_seed=ready['scenes'],ready_animation_script_key=fingerprint(ready['script']))
+        saved={}
     options = saved.get('options', {})
+    if (saved and not animated and payload.get('action') in ('references','images','build')
+            and options.get('character_consistency')
+            and payload.get('browser_account',options.get('browser_account','')) != options.get('browser_account','')):
+        binding_state=read(project/'studio_agent_images.json')
+        prior_accounts={row.get('account','') for row in binding_state.get('account_sessions',[])}
+        selected_is_stale=(payload.get('browser_account','') in prior_accounts
+                           and payload.get('_account_selection_from') != options.get('browser_account',''))
+        from ai_studio_account_rotation import select_account
+        selected={**options,**payload,'project':str(project)}
+        if not selected_is_stale:
+            select_account(selected,options,cancel,lambda message:print('[INFO] '+message,flush=True))
+            binding={key:selected[key] for key in ('browser_account','flow_url','_rotation_scope','_rotation_restored','_reference_flow_url')}
+            payload.update(binding);options={**options,**binding}
     if saved and payload.get('action') != 'login' and options.get('character_consistency'):
         from ai_studio_account_rotation import restore
         restored = {**options, **payload, 'project': str(project)}
@@ -118,6 +139,7 @@ def studio(payload, settings, cancel, animated=False, emit=event):
         for key in ('image_path', 'audio_path', 'video_path'):
             if scene.get(key) and (not Path(scene[key]).is_absolute()):
                 scene[key] = str(project / scene[key])
+    if animated and payload.get('action')=='plan' and config.get('animate_multishot') and not any(s.get('image_path') or s.get('video_path') or s.get('audio_path') for s in previous):previous=[]
     if script == (saved.get('script') if saved else script) and previous and (animated or payload.get('action') != 'plan'):
         adapter.zb_scenes = previous
     else:
@@ -137,7 +159,8 @@ def studio(payload, settings, cancel, animated=False, emit=event):
     adapter.zb_last_video = str(project / saved['last_video']) if saved.get('last_video') else None
     if animated and saved:
         from ai_studio_animate_options import animation_count
-        if script != saved.get('script') or animation_count(config, len(adapter.zb_scenes)) != animation_count(options, len(adapter.zb_scenes)) or config['animate_model'] != options.get('animate_model', 'Omni 1.1 Flash'):
+        if (script != saved.get('script') or animation_count(config, len(adapter.zb_scenes), adapter.zb_scenes) != animation_count(options, len(adapter.zb_scenes), adapter.zb_scenes) or
+            any(config.get(k)!=options.get(k) for k in ('partial_animation_unit','animate_seconds')) or config['animate_model'] != options.get('animate_model', 'Omni 1.1 Flash')):
             adapter.zb_last_video = None
     if not animated and (script != saved.get('script') or payload.get('action') == 'plan'):
         adapter.zb_last_video = None
@@ -170,6 +193,9 @@ def studio(payload, settings, cancel, animated=False, emit=event):
             scene.update(image_path=str(destination), manual_image=True, image_status='done')
         config['script'] = '\n\n'.join((s['narration'] for s in adapter.zb_scenes))
         adapter.zb_last_video = None
+    config.pop('animation_ready', None)
+    config.pop('ready_original_script', None)
+    config.pop('_account_selection_from', None)
     config.pop('scene_seed', None)
     config.pop('package_seed', None)
     config.pop('scene_edit', None)
@@ -204,7 +230,10 @@ def studio(payload, settings, cancel, animated=False, emit=event):
         adapter._zb_start_worker = lambda work: work(q)
         adapter._zb_generate_package()
     phases.update(package=[package], save=[], edit=[])
+    if not animated and config.get('narration_mode') == 'continuous':
+        phases['build']=[adapter._zb_fill_prompts,adapter._zb_voice_pass,adapter._zb_images_pass,adapter._zb_render_pass]
     if animated:
+        phases['import-ready-animation'] = []
         phases['write-story'] = [adapter._zb_write_story]
         phases['build'] = [adapter._zb_fill_prompts, adapter._zb_voice_pass, adapter._zb_images_pass, adapter._zb_render_pass]
 
@@ -283,6 +312,7 @@ def studio(payload, settings, cancel, animated=False, emit=event):
             event(message=phase.__name__.replace('_zb_', '').replace('_', ' '))
             started = time.monotonic()
             phase(q, config)
+            if animated and phase == adapter._zb_voice_pass:adapter._opening_voice_ready=True
             print(f"[INFO] {phase.__name__.replace('_zb_', '').replace('_', ' ')} finished in {time.monotonic() - started:.1f}s.", flush=True)
         if action == 'export':
             if not adapter.zb_last_video or not Path(adapter.zb_last_video).is_file():

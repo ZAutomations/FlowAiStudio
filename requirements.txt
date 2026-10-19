@@ -13,3 +13,6 @@ google-auth==2.55.2
 pydub==0.25.1
 psutil
 playwright>=1.48.0
+
+faster-whisper==1.2.1
+huggingface-hub<1

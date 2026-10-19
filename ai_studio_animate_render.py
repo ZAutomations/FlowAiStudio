@@ -8,6 +8,9 @@ from ai_studio_pipeline import TRANSITIONS, build_timeline, check_cancel, run_ff
 
 def render_animated_video(scenes, project, options, cancel=None, progress=None, log=None):
     """Standalone scene assembly on one continuous narration clock with clean cuts."""
+    if options.get('camera_transitions_enabled'):
+        from ai_studio_camera_transitions import settings as validate_camera_transitions
+        validate_camera_transitions(options)
     project = Path(project).resolve()
     project.mkdir(parents=True, exist_ok=True)
     progress = progress or (lambda value: None)
@@ -27,7 +30,7 @@ def render_animated_video(scenes, project, options, cancel=None, progress=None, 
     render_dir.mkdir(exist_ok=True)
     segments = []
     voice_files = []
-    animated = animation_count(options, len(scenes))
+    animated = animation_count(options, len(scenes), scenes)
     for scene, shot in zip(scenes, timeline):
         check_cancel(cancel)
         i = shot['index']
@@ -41,6 +44,11 @@ def render_animated_video(scenes, project, options, cancel=None, progress=None, 
             if not valid_video(video):
                 raise RuntimeError(f'Scene {i + 1} needs its matched animated clip before rendering.')
             vf = f'scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},setsar=1,fps={fps},tpad=stop_mode=clone:stop_duration={length:.6f}'
+            from ai_studio_animate_options import active_video_seconds
+            active = active_video_seconds(options, shot)
+            if active < shot['duration'] - 1e-7:
+                vf += f',trim=duration={active:.6f},setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration={length:.6f}'
+                log(f'Opening animation cutoff: scene {i+1} moves for {active:.2f}s, then holds as a still image.')
             input_args = ['-i', video]
         else:
             vf = f'scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},setsar=1,fps={fps}'
@@ -76,6 +84,8 @@ def render_animated_video(scenes, project, options, cancel=None, progress=None, 
     from ai_studio_tab_render import captions_enabled
     use_transitions = False
     use_effects = False
+    from ai_studio_camera_transitions import apply as apply_camera_transitions
+    visual_source, sfx = apply_camera_transitions(visual_source, timeline, options, cancel, log, sfx)
     progress(80)
     settings['_zb_use_text_effects'] = use_effects
     cues = write_subtitles(project, scenes, timeline, width, height, settings)
@@ -92,6 +102,10 @@ def render_animated_video(scenes, project, options, cancel=None, progress=None, 
         graph = f'[1:a]apad=pad_dur={thumbnail_duration},asplit=2[voice][control];[2:a]volume={volume}[music];[music][control]sidechaincompress=threshold=0.03:ratio=6[duck];[voice][duck]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95[a]'
     else:
         graph = f'[1:a]apad=pad_dur={thumbnail_duration}[a]'
+    if sfx:
+        sfx_index = 3 if bgm else 2
+        args += ['-i', sfx]
+        graph = graph.replace('[a]', '[baseaudio]') + f';[baseaudio][{sfx_index}:a]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95[a]'
     args += ['-filter_complex', graph, '-map', '0:v', '-map', '[a]']
     want_captions = options.get('captions', True)
     if options.get('use_captions_tab'):

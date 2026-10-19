@@ -5,7 +5,7 @@ root=Path(__file__).resolve().parents[1];sys.path.insert(0,str(root))
 from runtime_paths import configure
 configure()
 errors=[]
-for name in ('fastapi','uvicorn','webview','requests','PIL','numpy','soundfile','kokoro_onnx','onnxruntime','playwright.sync_api','google.auth','openpyxl'):
+for name in ('fastapi','uvicorn','webview','requests','PIL','numpy','soundfile','kokoro_onnx','onnxruntime','playwright.sync_api','google.auth','openpyxl','faster_whisper'):
     try:importlib.import_module(name)
     except Exception as e:errors.append(name+': '+str(e))
 for name in ('desktop.worker','desktop.server','studio_voice','clipper_captions','ai_studio_animate'):

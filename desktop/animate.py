@@ -3,7 +3,7 @@ import copy
 from pathlib import Path
 from .storage import ROOT, read, atomic, public
 
-PRESET_KEYS = ('animation_mode','animate_count','animate_model','auto_project','auto_reference','reference_mode',
+PRESET_KEYS = ('animation_mode','animate_count','partial_animation_unit','animate_seconds','animate_clip_seconds','animate_multishot','animate_model','auto_project','auto_reference','reference_mode',
                'character_names','place_name','reference_design','reference_files',
                'style_name','custom_style','continuity','resolution','narration_style','narration_direction')
 
@@ -32,7 +32,8 @@ def metadata(settings, root=ROOT):
     for name, value in presets.items():
         converted[name]={**value.get('animate',{}), **{oldmap[k]:v for k,v in value.get('studio',{}).items() if k in oldmap}}
     converted.update(read(root/'.desktop/animate_presets.json'))
-    return {**inherited,'defaults':defaults,'presets':converted,'scenes':draft.get('scenes',[])}
+    from ai_studio_animate_prompts import master_prompt
+    return {**inherited,'master_prompts':{mode:master_prompt(mode) for mode in ('partial','full')},'defaults':defaults,'presets':converted,'scenes':draft.get('scenes',[])}
 
 def save_preset(name, options, root=ROOT):
     name=str(name).strip()
@@ -94,7 +95,7 @@ def attach_clip(adapter, config, edit, cancel):
     from ai_studio_animate_media import valid_video
     from ai_studio_pipeline import run_ffmpeg
     index=edit.get('index');source=edit.get('video_path','')
-    if type(index) is not int or not 0<=index<animation_count(config,len(adapter.zb_scenes)):
+    if type(index) is not int or not 0<=index<animation_count(config,len(adapter.zb_scenes),adapter.zb_scenes):
         raise ValueError('Select a scene animated by the current mode')
     if not valid_video(source):raise ValueError('Choose a playable video clip')
     target=Path(config['project'])/'videos'/f'scene_{index+1:04d}.mp4';target.parent.mkdir(exist_ok=True)

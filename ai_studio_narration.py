@@ -13,6 +13,7 @@ STYLES={
 }
 
 def validate(config):
+    if config.get('narration_mode','scene') not in ('scene','continuous'):raise ValueError('Choose scene-by-scene or continuous narration')
     if config.get('narration_style','original') not in STYLES:raise ValueError('Choose a supported narration style')
     if len(str(config.get('narration_direction','')))>2000:raise ValueError('Extra narration direction must be at most 2000 characters')
 

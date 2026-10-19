@@ -34,19 +34,27 @@ class ZBotImageGenerator:
         'flow': {'url': 'https://labs.google/fx/tools/flow', 'label': 'Google Flow'},
     }
 
-    def __init__(self, provider='gemini', profile_dir=None, log=None, mode='persistent', flow_project_url='', cancel=None, share_google_profile=False, flow_aspect_ratio='', cdp_port=None, browser_account=''):
+    def __init__(self, provider='gemini', profile_dir=None, log=None, mode='persistent', flow_project_url='', cancel=None, share_google_profile=False, flow_aspect_ratio='', cdp_port=None, browser_account='', browser_type='chrome'):
         if provider not in self.PROVIDERS:
             raise ValueError(f"Unknown provider {provider!r}. "
                              f"Choose from {list(self.PROVIDERS)}")
+        if browser_type not in ('chrome', 'edge'):
+            raise ValueError('Choose Google Chrome or Microsoft Edge')
+        self.browser_type = browser_type
+        self.browser_label = 'Microsoft Edge' if browser_type == 'edge' else 'Chrome'
         self.provider = provider
         self.profile_dir = Path(profile_dir) if profile_dir else DEFAULT_PROFILE_DIR
         self.browser_account = browser_account
         self._log_cb = log or (lambda msg, level='info': None)
         self.mode = mode                     # 'persistent' | 'cdp'
         self.share_google_profile = provider == 'flow' and bool(share_google_profile)
-        self.cdp_port = 10312 if self.share_google_profile else {'gemini': 10312, 'metaai': 9233, 'flow': 10314}[provider]
+        self.cdp_port = 10312 if self.share_google_profile else {'gemini': 10312, 'metaai': 10313, 'flow': 10314}[provider]
         if cdp_port is not None:
             self.cdp_port = int(cdp_port)
+        if browser_type == 'edge':
+            self.profile_dir = self.profile_dir / 'edge'
+            if cdp_port is None:
+                self.cdp_port += 3000
         self.flow_project_url = flow_project_url
         self.flow_aspect_ratio = flow_aspect_ratio
         self._flow_image_mode_verified = False
@@ -56,10 +64,13 @@ class ZBotImageGenerator:
         self._chrome_proc = None             # Chrome we launched for CDP mode
         self._op_lock = threading.Lock()     # one browser op at a time
 
+    def _browser_error(self, message):
+        return RuntimeError(str(message).replace('Chrome', self.browser_label))
+
     # ── helpers ────────────────────────────────────────────────────────
     def _log(self, msg, level='info'):
         try:
-            self._log_cb(msg, level)
+            self._log_cb(msg.replace('Chrome', self.browser_label), level)
         except Exception:
             pass
 
@@ -90,6 +101,17 @@ class ZBotImageGenerator:
                 continue
         return shutil.which('chrome') or shutil.which('chrome.exe')
 
+    @staticmethod
+    def find_edge():
+        for base in ('PROGRAMFILES', 'PROGRAMFILES(X86)', 'LOCALAPPDATA'):
+            candidate = Path(os.environ.get(base, '')) / 'Microsoft/Edge/Application/msedge.exe'
+            if candidate.is_file():
+                return str(candidate)
+        return shutil.which('msedge') or shutil.which('msedge.exe')
+
+    def find_browser(self):
+        return self.find_edge() if self.browser_type == 'edge' else self.find_chrome()
+
     @property
     def _profile_path(self) -> Path:
         return self.profile_dir / ('profile_gemini' if self.share_google_profile else f'profile_{self.provider}')
@@ -101,8 +123,10 @@ class ZBotImageGenerator:
             viewport={'width': 1280, 'height': 900},
             args=list(_BROWSER_ARGS) + list(extra_args or []),
         )
-        if self.find_chrome():
-            opts['channel'] = 'chrome'       # real Chrome, not bundled Chromium
+        if self.find_browser():
+            opts['channel'] = 'msedge' if self.browser_type == 'edge' else 'chrome'       # real Chrome, not bundled Chromium
+        elif self.browser_type == 'edge':
+            raise self._browser_error('Microsoft Edge not found. Install Edge or select Google Chrome.')
         else:
             self._log('⚠️ Google Chrome not found — using bundled Chromium. '
                       'Google may block sign-in; install Chrome or use '
@@ -115,7 +139,7 @@ class ZBotImageGenerator:
         try:
             from ai_studio_browser_runtime import playwright_runtime
         except ImportError:
-            raise RuntimeError(
+            raise self._browser_error(
                 'Playwright is not installed.\n\n'
                 'Install it once with:\n'
                 '  pip install playwright\n'
@@ -191,7 +215,7 @@ class ZBotImageGenerator:
         except Exception as error:
             from playwright.sync_api import TimeoutError as PlaywrightTimeout
             if isinstance(error, PlaywrightTimeout):
-                raise RuntimeError('Chrome connection timed out before any image requests were sent. Save the project and stop the job, then close all dedicated AI Studio Chrome windows (including their Flow/Gemini tabs). Retry Generate Images so AI Studio can reopen its saved profile. Your saved scene progress and Google login are retained.') from error
+                raise self._browser_error('Chrome connection timed out before any image requests were sent. Save the project and stop the job, then close all dedicated AI Studio Chrome windows (including their Flow/Gemini tabs). Retry Generate Images so AI Studio can reopen its saved profile. Your saved scene progress and Google login are retained.') from error
             raise
         try:
             check_cancel(self.cancel)
@@ -213,12 +237,59 @@ class ZBotImageGenerator:
         except Exception:
             return False
 
+    def _handover_edge_login(self):
+        """Close only this app's ordinary Edge profile before enabling CDP.
+
+        Edge otherwise forwards the launch URL to the existing non-CDP process
+        and silently ignores the requested debugging port. Never touch personal
+        profiles or a browser already running with a debugging connection.
+        """
+        if self.browser_type != 'edge' or os.name != 'nt' or self._cdp_alive():
+            return
+        profile = str(self._profile_path.resolve()).replace("'", "''")
+        script = r"""
+$target = '__PROFILE__'
+$roots = @(Get-CimInstance Win32_Process -Filter "name = 'msedge.exe'" -ErrorAction Stop | Where-Object {
+    $command = $_.CommandLine
+    if ($command -match '--type=' -or $command -match '--remote-debugging-port=') { return $false }
+    $match = [regex]::Match($command, '--user-data-dir=(?:"([^"]+)"|([^ ]+))')
+    if (!$match.Success) { return $false }
+    $path = if ($match.Groups[1].Success) {$match.Groups[1].Value} else {$match.Groups[2].Value}
+    return [string]::Equals($path.TrimEnd('\'), $target.TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)
+})
+foreach ($root in $roots) {
+    $browserProcess = Get-Process -Id $root.ProcessId -ErrorAction SilentlyContinue
+    if (!$browserProcess) { continue }
+    if ($browserProcess.MainWindowHandle -ne 0) {
+        $null = $browserProcess.CloseMainWindow()
+        $null = $browserProcess.WaitForExit(10000)
+        $browserProcess.Refresh()
+    }
+    # Edge Startup Boost may retain a background owner after the window closes.
+    if (!$browserProcess.HasExited -and $browserProcess.MainWindowHandle -eq 0) {
+        Stop-Process -Id $root.ProcessId -ErrorAction Stop
+        $null = $browserProcess.WaitForExit(5000)
+    }
+    if (!$browserProcess.HasExited) { throw 'Dedicated Edge login window did not close. Finish any open dialog, then retry.' }
+}
+Write-Output $roots.Count
+""".replace('__PROFILE__', profile)
+        encoded = base64.b64encode(script.encode('utf-16le')).decode('ascii')
+        result = subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive',
+                                 '-EncodedCommand', encoded], capture_output=True,
+                                text=True, timeout=30, creationflags=0x08000000)
+        if result.returncode:
+            raise self._browser_error('Could not hand over the dedicated Edge login window. Close that window using Edge menu > Exit, then Retry. Saved login and progress retained.')
+        if result.stdout.strip() != '0':
+            self._log('Dedicated Edge login closed; reopening the same saved profile with its generation connection.', 'info')
+
     def _start_real_chrome(self):
         """Launch installed Chrome with its local debugging connection for generation."""
-        chrome = self.find_chrome()
+        chrome = self.find_browser()
         if not chrome:
-            raise RuntimeError('Google Chrome not found. Install Chrome to use '
+            raise self._browser_error(f'{self.browser_label} not found. Install the selected browser to use '
                                'this mode, or use the default login mode.')
+        self._handover_edge_login()
         self._profile_path.mkdir(parents=True, exist_ok=True)
         launch_url = self.PROVIDERS[self.provider]['url']
         project = urlparse(self.flow_project_url)
@@ -228,7 +299,7 @@ class ZBotImageGenerator:
             chrome,
             f'--remote-debugging-port={self.cdp_port}',
             f'--user-data-dir={self._profile_path}',
-            '--no-first-run', '--no-default-browser-check',
+            '--no-first-run', '--no-default-browser-check', '--disable-background-mode',
             launch_url,
         ]
         self._log(f'🌐 Launching Chrome → {self.PROVIDERS[self.provider]["label"]}', 'info')
@@ -241,15 +312,15 @@ class ZBotImageGenerator:
                 return True
             code=self._chrome_proc.poll()
             if code is not None:
-                if code!=0:raise RuntimeError(f'Dedicated Chrome exited with code {code} before its connection started. Saved login and project retained; close the dedicated account browser and Retry generation.')
+                if code!=0:raise self._browser_error(f'Dedicated Chrome exited with code {code} before its connection started. Saved login and project retained; close the dedicated account browser and Retry generation.')
                 if exited_at is None:exited_at=time.monotonic()
                 # Chrome can hand off to its browser process before the local
                 # endpoint is ready. Allow that startup race, but do not loop
                 # indefinitely when an ordinary login window owns the profile.
                 if time.monotonic()-exited_at>=5:
-                    raise RuntimeError(f'The selected account’s Chrome profile is already open without generation connection on port {self.cdp_port}. Finish sign-in, then use Chrome menu (three dots) > Exit in that dedicated login browser so its background process also stops. Then Retry Build All / Generate Images. Do not click Login again. Saved login and Flow project retained.')
+                    raise self._browser_error(f'The selected account’s Chrome profile is already open without generation connection on port {self.cdp_port}. Finish sign-in, then use Chrome menu (three dots) > Exit in that dedicated login browser so its background process also stops. Then Retry Build All / Generate Images. Do not click Login again. Saved login and Flow project retained.')
             time.sleep(0.5)
-        raise RuntimeError('Chrome opened but its automation connection was unavailable. Use Chrome menu (three dots) > Exit in the dedicated AI Studio browser, then Retry Build All / Generate Images. Do not click Login again. Saved login and project retained.')
+        raise self._browser_error('Chrome opened but its automation connection was unavailable. Use Chrome menu (three dots) > Exit in the dedicated AI Studio browser, then Retry Build All / Generate Images. Do not click Login again. Saved login and project retained.')
 
     # ── public operations ──────────────────────────────────────────────
     def login(self, timeout_seconds=1800):
@@ -270,11 +341,11 @@ class ZBotImageGenerator:
         Reuse only this provider's dedicated profile when generation starts.
         Closing Chrome finishes the manual step, not proof of authentication.
         """
-        chrome = self.find_chrome()
+        chrome = self.find_browser()
         if not chrome:
-            raise RuntimeError('Install or update Google Chrome to sign in. Google login does not use bundled Chromium.')
+            raise self._browser_error(f'Install or update {self.browser_label} to sign in. Google login does not use bundled Chromium.')
         if self._cdp_alive():
-            raise RuntimeError('Close the dedicated AI Studio Chrome window, then click Login again. Google sign-in must happen before the generation connection starts. Other Chrome windows can remain open.')
+            raise self._browser_error('Close the dedicated AI Studio Chrome window, then click Login again. Google sign-in must happen before the generation connection starts. Other Chrome windows can remain open.')
         self._profile_path.mkdir(parents=True, exist_ok=True)
         url = self.PROVIDERS[self.provider]['url']
         if self.provider == 'flow':
@@ -285,7 +356,7 @@ class ZBotImageGenerator:
         if self.share_google_profile:
             self._log('Flow login uses the same dedicated profile as Gemini. Its existing Google sign-in is retained; no personal Chrome profile or cookies are copied.', 'info')
         process = subprocess.Popen([chrome, f'--user-data-dir={self._profile_path}',
-                                    '--no-first-run', '--no-default-browser-check', '--new-window', url])
+                                    '--no-first-run', '--no-default-browser-check', '--disable-background-mode', '--new-window', url])
         started = time.monotonic()
         while process.poll() is None:
             check_cancel(self.cancel)
@@ -294,9 +365,9 @@ class ZBotImageGenerator:
                 return False
             time.sleep(.5)
         if process.returncode:
-            raise RuntimeError('Chrome could not complete the manual login window. Close the dedicated profile window and retry Login.')
+            raise self._browser_error('Chrome could not complete the manual login window. Close the dedicated profile window and retry Login.')
         if time.monotonic() - started < 2:
-            raise RuntimeError('Chrome handed this request to an already-open profile. Close all windows for the dedicated AI Studio profile, then retry Login. Other Chrome profiles can remain open.')
+            raise self._browser_error('Chrome handed this request to an already-open profile. Close all windows for the dedicated AI Studio profile, then retry Login. Other Chrome profiles can remain open.')
         self._log('✅ Manual Chrome window closed. Profile retained; generation will check whether sign-in succeeded.', 'success')
         return True
 
@@ -390,7 +461,7 @@ class ZBotImageGenerator:
                             try:
                                 on_result(i, ok, detail)
                             except Exception as error:
-                                raise RuntimeError('Could not save image result: ' + str(error)) from error
+                                raise self._browser_error('Could not save image result: ' + str(error)) from error
                         if not ok and any(word in str(detail).lower() for word in ('download failed', 'quota', 'limit reached', 'sign in', 'logged in', 'rate limit', 'refused', 'declined', 'flow setup', 'select image mode', 'could not submit')):
                             # A session/quota failure will affect every remaining scene.
                             for remaining in range(i + 1, len(items)):
@@ -557,7 +628,7 @@ class ZBotImageGenerator:
             if len(direct) == 1:
                 token = direct[0]['token']
                 if token in matches and matches[token]['asset_id'] != asset['id']:
-                    raise RuntimeError('Multiple assets match one scene request. Batch paused instead of assigning an ambiguous image.')
+                    raise self._browser_error('Multiple assets match one scene request. Batch paused instead of assigning an ambiguous image.')
                 matches[token] = {'src': asset['src'], 'asset_id': asset['id']}
         return matches
 
@@ -684,7 +755,7 @@ class ZBotImageGenerator:
         enabled=(agent.is_visible() and agent.get_attribute('aria-pressed')=='true') or (host.is_visible() and 'checked' in (host.get_attribute('class') or '').split())
         if enabled:
             stop=page.get_by_role('button',name=re.compile(r'^Stop(?: generation| generating)?$',re.I)).first
-            if stop.is_visible():raise RuntimeError('Flow setup: Agent is still generating. Wait for it to finish before switching to image generation. No request submitted.')
+            if stop.is_visible():raise self._browser_error('Flow setup: Agent is still generating. Wait for it to finish before switching to image generation. No request submitted.')
             self._flow_image_mode_verified=False;self._flow_settings_summary=''
             self._log('Switching Flow from Agent Mode to ordinary image generation…')
             (agent if agent.is_visible() else host).click(timeout=5000)
@@ -710,7 +781,7 @@ class ZBotImageGenerator:
             if legacy.is_visible():
                 self._flow_image_mode_verified = True
                 return
-            raise RuntimeError('Flow setup: no recognized image-generation control. No request submitted.')
+            raise self._browser_error('Flow setup: no recognized image-generation control. No request submitted.')
         trigger = page.get_by_role('button', name='Settings trigger', exact=True).first
         image_name = re.compile(r'(?:^|\s)Image$', re.I)
         image = page.get_by_role('radio', name=image_name).first
@@ -735,11 +806,11 @@ class ZBotImageGenerator:
             image.wait_for(state='hidden', timeout=3000)
             self._flow_settings_summary = ' '.join(trigger.inner_text().split())
             if not re.search(r'\bx1\b', self._flow_settings_summary):
-                raise RuntimeError('Flow did not retain one-output selection.')
+                raise self._browser_error('Flow did not retain one-output selection.')
             self._flow_image_mode_verified = True
             self._log('Flow image settings verified: ' + self._flow_settings_summary)
         except Exception as error:
-            raise RuntimeError('Flow setup: could not verify Image mode, x1 output and requested aspect ratio. No generation submitted. ' + str(error)) from error
+            raise self._browser_error('Flow setup: could not verify Image mode, x1 output and requested aspect ratio. No generation submitted. ' + str(error)) from error
 
     # ── DOM helpers (best-effort, provider-specific) ───────────────────
     def _composer_selectors(self):
@@ -1112,7 +1183,7 @@ class ZBotImageGenerator:
                         return image.screenshot(type='png', timeout=15_000, animations='disabled')
                 except Exception:
                     continue
-        raise RuntimeError('The generated image is not loaded in this tab. Keep the conversation open and retry Recover Images.')
+        raise self._browser_error('The generated image is not loaded in this tab. Keep the conversation open and retry Recover Images.')
 
     def _browser_image_bytes(self,page,src):
         """Download through Chrome's authenticated network, not a separate client."""
@@ -1121,14 +1192,14 @@ class ZBotImageGenerator:
             frame=client.send('Page.getFrameTree')['frameTree']['frame']['id']
             resource=client.send('Network.loadNetworkResource',{'frameId':frame,'url':src,'options':{'disableCache':False,'includeCredentials':True}})['resource']
             handle=resource.get('stream')
-            if not resource.get('success') or not handle:raise RuntimeError('Chrome could not load the matched image resource.')
+            if not resource.get('success') or not handle:raise self._browser_error('Chrome could not load the matched image resource.')
             chunks=[];size=0
             while True:
                 check_cancel(self.cancel)
                 part=client.send('IO.read',{'handle':handle,'size':1048576})
                 chunk=base64.b64decode(part['data']) if part.get('base64Encoded') else part['data'].encode('utf-8')
                 chunks.append(chunk);size+=len(chunk)
-                if size>50_000_000:raise RuntimeError('Matched image exceeds the download size limit.')
+                if size>50_000_000:raise self._browser_error('Matched image exceeds the download size limit.')
                 if part.get('eof'):return b''.join(chunks)
         finally:
             if handle:
@@ -1175,7 +1246,7 @@ class ZBotImageGenerator:
                         self._log('Chrome image resource unavailable; trying direct download, then displayed pixels.', 'warn')
                 resp = page.request.get(src, timeout=15_000 if self.provider=='flow' else 60_000)
                 if not resp.ok:
-                    raise RuntimeError('Image HTTP download failed; attempting displayed-image extraction.')
+                    raise self._browser_error('Image HTTP download failed; attempting displayed-image extraction.')
                 raw = resp.body()
             self._save_image_bytes(raw, out_path, self.cancel)
             return True

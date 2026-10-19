@@ -12,7 +12,7 @@ import threading
 import time
 from ai_studio_pipeline import atomic_json, check_cancel, fingerprint, image_prompt, probe, valid_image, run_ffmpeg
 from zbot_browser_images import ZBotImageGenerator
-from ai_studio_animate_options import animation_count
+from ai_studio_animate_options import animation_count, clip_seconds
 from ai_studio_image_models import IMAGE_MODELS, preferred, quota_model, quota_models, ModelQuotaExhausted, ImageModelsExhausted
 
 
@@ -62,7 +62,7 @@ def media_plan(scenes, config):
     aspect=RES_ASPECT.get(config['resolution'],'16:9')
     references=[(Path(p).name,fingerprint(Path(p).read_bytes().hex())) for p in config.get('references',[]) if Path(p).is_file()]
     records=[]
-    animated = animation_count(config, len(scenes))
+    animated = animation_count(config, len(scenes), scenes)
     for i, scene in enumerate(scenes):
         scene_refs=config.get('scene_reference_map')
         used=sorted(scene_refs[i]) if scene_refs is not None else None
@@ -70,8 +70,11 @@ def media_plan(scenes, config):
         kind='video' if i < animated and not config.get('image_agent') else 'image'
         prompt=image_prompt(scene,config['style'],aspect,config.get('continuity',''))
         from ai_studio_story import is_narration_story, scene_direction, video_direction, narration_direction
-        if is_narration_story(config):prompt=video_direction(prompt,narration_direction(config)) if kind=='video' else scene_direction(prompt,narration_direction(config))
-        key=fingerprint('animate-v2',i,kind,6 if kind=='video' else 0,prompt,config.get('animate_model') if kind=='video' else 'Nano Banana',selected_references)
+        if is_narration_story(config):prompt=video_direction(prompt,narration_direction(config),clip_seconds(config),config.get('animate_multishot',False)) if kind=='video' else scene_direction(prompt,narration_direction(config))
+        elif kind=='video' and config.get('animate_multishot'):prompt=video_direction(prompt,'Silent on-screen characters; local narration is added separately.',clip_seconds(config),True)
+        if kind=='video' and config.get('animate_multishot') and scene.get('shots'):
+            prompt+='\nTIMED SHOTS INSIDE THIS SINGLE CLIP (not separate outputs): '+json.dumps(scene['shots'],ensure_ascii=False)
+        key=fingerprint('animate-v2',i,kind,clip_seconds(config) if kind=='video' else 0,prompt,config.get('animate_model') if kind=='video' else 'Nano Banana',selected_references)
         if used is not None:key=fingerprint('scene-cast-v1',key,used)
         token='AS_SCENE_'+key[:20]
         records.append({'index':i,'kind':kind,'key':key,'token':token,'prompt':prompt,
@@ -90,7 +93,7 @@ def batch_prompt(records,config):
            ('Permanent reference names: '+', '.join(Path(p).stem for p in config.get('references',[]))+'. Character/location bible: '+json.dumps(config.get('reference_descriptions',{}),ensure_ascii=False)+'. Keep story roles mapped to these same named assets.' if config.get('references') else 'Choose subjects, objects, environments and explanatory visual actions from the scene prompts. Do not introduce CharacterA, CharacterB or StoryPlace.'),
            ('All listed scene outputs must be VIDEO clips. Use '+config['animate_model']+'.' if all(r['kind']=='video' for r in records)
             else 'For images use Nano Banana. For videos use '+config['animate_model']+'.'),
-           'Videos: silent characters, no dialogue, narration, music or captions. Add subtle natural character action and camera movement. Duration exactly 6 seconds.',
+           'Videos: silent characters, no dialogue, narration, music or captions. Add subtle natural character action and camera movement. Duration exactly '+str(clip_seconds(config))+' seconds. '+('Each VIDEO output is one clip containing 2–4 sequential connected shots timed to its narration. Do not create a separate media output per shot, or a simultaneous collage/storyboard.' if config.get('animate_multishot') else 'Use one continuous shot per clip.'),
            'IMPORTANT: Begin each individual media generation prompt with its exact AS_SCENE tracking reference, verbatim as plain prompt text. Keep it in the saved generation prompt, not only in your chat reply or tool metadata. It is a tracking label; do not display or speak it in the media. Never omit, shorten or replace the tracking reference.',
            'Generate only this batch. Do not regenerate earlier scenes.']
     if config.get('image_agent'):
@@ -517,7 +520,7 @@ def _prepare_agent_prompt_once(config,prompt_file,references,cancel,log):
           '--no-submit','--paste','--aspect',config['aspect']]
     if config.get('_upload_references_only'):args+=['--upload-references-only']
     if config.get('image_agent'):args+=['--image-only','--image-model',preferred(config)]
-    else:args+=['--scene-seconds','6','--video-model',config['animate_model']]
+    else:args+=['--scene-seconds',str(clip_seconds(config)),'--video-model',config['animate_model']]
     if references:
         if config.get('image_agent'):args+=['--reference-files-json',json.dumps(references)]
         else:args+=['--refs',','.join(references)]

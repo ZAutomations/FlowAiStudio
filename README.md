@@ -14,7 +14,7 @@ Scene planning, visual/story presets, unchanged narration, reviewed cast/locatio
 
 ## Rendering boundary
 
-The original editor's transition/effect processors, LUTs, overlays, particles, SFX and non-ASS caption engines are **not included**. Current joins are clean cuts. This folder is the starting point for your own transitions; image camera motion remains an optional AI Studio feature. Imported projects cannot enable the removed render engines.
+The original editor's transition/effect processors, LUTs, overlays, particles, SFX and non-ASS caption engines are **not included**. Joins use clean cuts by default. AI Studio and Animate now include an independent Camera transitions & swoosh card with seven original effects, mix selection, duration, interval, mute and volume controls. See docs/camera-transitions.md. Image camera motion remains optional. Imported projects cannot enable the removed render engines.
 
 ## Move to another Windows x64 machine
 

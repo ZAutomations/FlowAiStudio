@@ -225,6 +225,9 @@ def _concat_file(paths, output):
 
 def render_video(scenes, project, options, cancel=None, progress=None, log=None):
     """Standalone scene assembly on one continuous narration clock with clean cuts."""
+    if options.get('camera_transitions_enabled'):
+        from ai_studio_camera_transitions import settings as validate_camera_transitions
+        validate_camera_transitions(options)
     project = Path(project).resolve()
     project.mkdir(parents=True, exist_ok=True)
     progress = progress or (lambda value: None)
@@ -291,6 +294,8 @@ def render_video(scenes, project, options, cancel=None, progress=None, log=None)
     from ai_studio_tab_render import captions_enabled
     use_transitions = False
     use_effects = False
+    from ai_studio_camera_transitions import apply as apply_camera_transitions
+    visual_source, sfx = apply_camera_transitions(visual_source, timeline, options, cancel, log, sfx)
     progress(80)
     settings['_zb_use_text_effects'] = use_effects
     cues = write_subtitles(project, scenes, timeline, width, height, settings)
@@ -308,6 +313,10 @@ def render_video(scenes, project, options, cancel=None, progress=None, log=None)
         graph = f'[1:a]apad=pad_dur={thumbnail_duration},asplit=2[voice][control];[2:a]volume={volume}[music];[music][control]sidechaincompress=threshold=0.03:ratio=6[duck];[voice][duck]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95[a]'
     else:
         graph = f'[1:a]apad=pad_dur={thumbnail_duration}[a]'
+    if sfx:
+        sfx_index = 3 if bgm else 2
+        args += ['-i', sfx]
+        graph = graph.replace('[a]', '[baseaudio]') + f';[baseaudio][{sfx_index}:a]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95[a]'
     args += ['-filter_complex', graph, '-map', '0:v', '-map', '[a]']
     want_captions = options.get('captions', True)
     if options.get('use_captions_tab'):

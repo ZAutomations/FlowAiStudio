@@ -31,12 +31,27 @@ class AnimateStudio(AIStudioWorkflowMixin, ZBotBaseTabMixin):
         write_story(self, q, config)
 
     def _zb_fill_prompts(self, q, config):
+        from ai_studio_pipeline import fingerprint
+        if config.get('ready_animation_script_key') == fingerprint(config['script']) and all(s.get('visual_prompt') for s in self.zb_scenes):
+            q.put(('log', 'info', 'Reusing imported Animate visual prompts; narration is unchanged.'))
+            return
         from ai_studio_story import is_narration_story
         if is_narration_story(config):
             return self._zb_write_story(q, config)
         return super()._zb_fill_prompts(q, config)
 
     def _zb_images_pass(self, q, config, recover_only=False):
+        from ai_studio_animate_options import partial_options
+        if config.get('animation_mode','partial') == 'partial' and partial_options(config)[0] == 'seconds':
+            q.put(('log','info','Measuring opening animation against actual narration. Generating/reusing voice first.'))
+            if not getattr(self,'_opening_voice_ready',False):self._zb_voice_pass(q, config)
+            self._opening_voice_ready=True
+            from ai_studio_animate_options import scene_duration, animation_count
+            elapsed=0
+            for scene in self.zb_scenes:
+                if elapsed>=float(config.get('animate_seconds',80)):break
+                scene['animation_duration']=scene_duration(scene);elapsed+=scene['animation_duration']
+            q.put(('log','info',f'Opening {config.get("animate_seconds",80)} seconds: {animation_count(config,len(self.zb_scenes),self.zb_scenes)} scenes need video clips; remaining scenes use images.'))
         if recover_only:
             raise RuntimeError('Animate resumes matched images and clips through Generate Agent Media.')
         from ai_studio_animate_setup import ensure_project, ensure_references

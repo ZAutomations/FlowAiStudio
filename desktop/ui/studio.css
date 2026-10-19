@@ -21,3 +21,5 @@ body.studio-view header{position:fixed;top:0;left:280px;right:0;height:60px;z-in
 .studio-action-label{flex:0 0 115px;font-size:10px;font-weight:600;color:var(--muted)}
 .studio-action-buttons{display:flex;flex-wrap:wrap;gap:5px;min-width:0}
 @media(max-width:700px){.studio-action-row{align-items:flex-start;flex-direction:column;gap:4px}.studio-action-label{flex-basis:auto}}
+
+.camera-transition-card .form-grid>.full{grid-column:1/-1}.camera-transition-card .help{line-height:1.6}

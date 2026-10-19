@@ -25,9 +25,16 @@ def add(label, root=ROOT):
         return row
 
 def browser_options(config, root=ROOT):
+    browser = config.get('browser_type', 'chrome')
+    if browser not in ('chrome', 'edge'):
+        raise ValueError('Choose Google Chrome or Microsoft Edge')
     account = config.get('browser_account', '')
     if not account:
-        return {}
+        if browser == 'chrome':
+            return {}
+        provider = config.get('provider', 'flow')
+        port = 10312 if provider == 'flow' and config.get('share_google_profile') else {'gemini':10312,'metaai':10313,'flow':10314}.get(provider,10314)
+        return {'browser_type': browser, 'cdp_port': port + 3000}
     if not isinstance(account, str) or not re.fullmatch(r'[0-9a-f]{32}', account):
         raise ValueError('Choose a saved browser account')
     row = next((r for r in profiles(root) if r['id'] == account), None)
@@ -35,4 +42,4 @@ def browser_options(config, root=ROOT):
         raise ValueError('The selected browser account is unavailable')
     offset = {'gemini': 0, 'flow': 0 if config.get('share_google_profile') else 2, 'metaai': 1}.get(config.get('provider', 'flow'), 0)
     return {'profile_dir': root / 'zbot_profiles/accounts' / account,
-            'cdp_port': row['port'] + offset, 'browser_account': account}
+            'cdp_port': row['port'] + offset + (3000 if browser == 'edge' else 0), 'browser_account': account, 'browser_type': browser}

@@ -207,6 +207,9 @@ class AIStudioWorkflowMixin:
 
     def _zb_voice_pass(self, q, config):
         from studio_voice import TTSGenerator
+        if config.get('narration_mode') == 'continuous' and config.get('workflow') != 'animate':
+            from ai_studio_continuous_voice import generate
+            return generate(self, q, config, TTSGenerator.generate_voiceover)
         from ai_studio_narration import settings_for, resolve, STYLES
         settings = config['settings']
         chosen = config['voice_engine']
@@ -260,6 +263,8 @@ class AIStudioWorkflowMixin:
             q.put(('log', 'success', f'Scene {i + 1}: voice saved ({locked_engine}).'))
 
     def _zb_render_pass(self, q, config):
+        if config.get('narration_mode') == 'continuous' and any(s.get('timing_source') != 'continuous-aligned' for s in self.zb_scenes):
+            raise RuntimeError('Generate Voice in Continuous Narration mode before rendering. Existing scene audio and images are retained.')
         self.zb_last_video = None
         self.zb_last_video = str(render_video(self.zb_scenes, config['project'], config, self._zb_cancel, progress=lambda n: q.put(('progress', n)), log=lambda msg: q.put(('log', 'info', msg))))
         self._zb_save_project(config)
