@@ -82,7 +82,7 @@ def studio(payload, settings, cancel, animated=False, emit=event):
         binding_state=read(project/'studio_agent_images.json')
         prior_accounts={row.get('account','') for row in binding_state.get('account_sessions',[])}
         selected_is_stale=(payload.get('browser_account','') in prior_accounts
-                           and payload.get('_account_selection_from') != options.get('browser_account',''))
+                           and payload.get('account_selection_from') != options.get('browser_account',''))
         from ai_studio_account_rotation import select_account
         selected={**options,**payload,'project':str(project)}
         if not selected_is_stale:
@@ -195,7 +195,7 @@ def studio(payload, settings, cancel, animated=False, emit=event):
         adapter.zb_last_video = None
     config.pop('animation_ready', None)
     config.pop('ready_original_script', None)
-    config.pop('_account_selection_from', None)
+    config.pop('account_selection_from', None)
     config.pop('scene_seed', None)
     config.pop('package_seed', None)
     config.pop('scene_edit', None)
