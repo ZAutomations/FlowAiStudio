@@ -1,0 +1,9 @@
+{
+  "name": "ai-studio-animate-agent",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Ported Agent prompt/reference preparation adapter",
+  "dependencies": {
+    "puppeteer": "^24.35.0"
+  }
+}

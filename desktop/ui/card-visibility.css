@@ -1,0 +1,7 @@
+.card-collapse-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.card-visibility-toggle{flex-shrink:0;padding:5px 9px!important;font-size:11px!important;color:var(--muted);background:var(--glass);border-color:var(--border);white-space:nowrap}
+.card-visibility-toggle:hover{color:var(--text);border-color:var(--accent)}
+.is-collapsed>.collapsible-card-body{display:none!important}
+.is-collapsed>.card-collapse-heading{margin-bottom:0!important;padding-bottom:0!important;border-bottom:0!important}
+.card-collapse-heading>h2,.card-collapse-heading>h3{margin-top:0}
+.collapsible-card-body{min-width:0}

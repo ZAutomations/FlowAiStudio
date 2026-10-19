@@ -1,0 +1,149 @@
+/* Compact desktop presentation. Loaded last so all workflow screens share one
+   density scale without changing their controls, saved settings or behavior. */
+:root{--ui-sidebar:190px;--ui-gutter:18px;--shadow:0 2px 8px rgba(0,0,0,.08)}
+body{font-size:12px;line-height:1.45;background:var(--bg)}
+.sidebar{inset:0 auto 0 0;width:var(--ui-sidebar);padding:18px 10px 12px;border-radius:0;border-width:0 1px 0 0;box-shadow:none;background:var(--secondary)}
+.brand{font-size:13px;gap:8px;padding:0 4px 18px;letter-spacing:0}
+.brand-mark{width:29px;height:30px;border-radius:8px;font-size:13px;box-shadow:none}
+.brand small{font-size:6px;letter-spacing:.55px}
+.new-job{margin-bottom:18px}
+.nav-label{font-size:9px;letter-spacing:1.2px;margin:0 9px 7px}
+nav{gap:2px}
+nav a{font-size:12px;padding:7px 10px;gap:9px;border-radius:6px;min-height:32px}
+.nav-icon{font-size:14px;width:16px}
+.sidebar-bottom{padding:12px 5px 0;margin-top:auto;font-size:10px}
+.sidebar-bottom p{margin:5px 0;line-height:1.4}
+.workspace{margin-left:var(--ui-sidebar);min-width:0}
+header{height:48px;padding:0 var(--ui-gutter);gap:10px}
+.header-actions{gap:8px}.breadcrumbs{font-size:11px}.breadcrumbs span{margin:0 9px}
+header select{padding:5px 8px;width:100px;font-size:11px}
+main{padding:16px var(--ui-gutter);max-width:none}
+.page-heading,.ourscript-view .page-heading{margin-bottom:14px;gap:12px}
+.page-heading h1,.ourscript-view .page-heading h1{font-size:21px;letter-spacing:-.5px;margin:0 0 4px;line-height:1.3}
+.page-heading p{font-size:12px;margin:0}
+h2,.organized-settings h2{font-size:14px;letter-spacing:-.15px;margin:0}
+h3,.group-panel-heading h3,.os-group-heading h2{font-size:12px;letter-spacing:0}
+p{margin:4px 0}
+button{font-size:12px;padding:6px 10px;border-radius:6px;line-height:1.45}
+button.primary{box-shadow:none}button.subtle{padding:5px 0}
+input,select,textarea{font-size:12px;padding:6px 9px;border-radius:6px;line-height:1.45}
+textarea{min-height:72px;line-height:1.5}
+label{font-size:11px;margin-bottom:4px}
+.card,.original-settings-card,.os-controls>.card,.os-preview-column .card,.studio-card,.dub-preview{padding:12px;border-radius:10px;margin-bottom:12px;background:var(--secondary);box-shadow:none}
+.card-heading,.os-controls .card-heading{gap:10px;margin-bottom:10px}
+.heading-with-icon{gap:9px}.step-icon{width:28px;height:28px;border-radius:7px;font-size:14px}
+.heading-with-icon p{font-size:11px;margin:3px 0 0}
+.pill{padding:4px 7px;border-radius:5px;font-size:9px;letter-spacing:.6px}
+.form-grid,.settings-grid,.os-fields,.group-fields,.workflow-section .form-grid{gap:10px 12px}
+.path-control{gap:6px}.path-control button,.os-controls .path-control button{padding:6px 9px;font-size:11px}
+.help{font-size:10px;margin-top:4px;line-height:1.45}
+.form-footer{margin-top:12px;padding-top:10px;gap:8px}
+.actions,.stage-actions{gap:6px}.actions button{font-size:11px}.stage-actions{margin-top:10px}
+.checkbox{min-height:28px;gap:7px}.checkbox input{width:14px;height:14px}
+.notice{padding:9px 12px;margin-bottom:12px;border-radius:7px}
+.tabs{gap:4px;margin-bottom:10px}.tabs button{padding:6px 9px}
+.stats{gap:10px;margin-bottom:12px}.stat{padding:10px;border-radius:8px}.stat strong{font-size:18px}
+.organized-settings{padding:0}
+.organized-settings>.card-heading{margin:10px 0;gap:10px}
+.original-columns,.os-original-columns,.audio-mix-grid,.audio-engine-grid,.caption-control-columns,.transition-tiles,.cleanup-band{gap:10px}
+.original-columns .original-column .original-settings-card,.os-controls .organized-settings .original-column .original-settings-card{padding:12px;margin-bottom:10px}
+.group-panel-heading{padding-bottom:8px;margin-bottom:10px;gap:8px}
+.original-settings-card .group-panel-heading{margin-bottom:10px}
+.group-fields,.original-settings-card .group-fields{gap:8px}
+.group-fields .field>label,.original-settings-card .group-fields .field>label{font-size:11px;line-height:1.4;margin-bottom:4px}
+.group-fields input:not([type=checkbox]):not([type=color]):not([type=range]),.group-fields select,
+.original-settings-card .group-fields input:not([type=range]):not([type=checkbox]):not([type=color]),.original-settings-card .group-fields select,
+.os-controls input:not([type=checkbox]):not([type=color]):not([type=range]),.os-controls select{padding:6px 8px;font-size:12px}
+.group-toggle,.original-settings-card .group-toggle{min-height:25px;gap:8px}
+.group-toggle input{width:14px;height:14px}
+.numeric-control{gap:6px}
+.number-stepper{border-radius:5px;max-width:130px}
+.number-stepper button{width:25px;flex-basis:25px;padding:5px 0;font-size:13px;line-height:18px}
+.number-stepper input[type=number]{padding:5px 2px!important}
+.colour-input{gap:7px;padding:4px 7px;border-radius:6px}.colour-input input{width:32px;height:24px}
+.colour-input span{font-size:11px}
+.group-save,.os-controls>.form-footer{margin-top:12px;padding:9px 12px;border-radius:8px}
+.structured-setting,.structured-row,.workflow-section,.os-region,.caption-overrides{padding:10px;border-radius:8px}
+.structured-heading{margin-bottom:8px}.structured-row{margin-bottom:8px}
+.workflow-section{margin:10px 0}.workflow-section h3,.workflow-section[open] summary{margin-bottom:10px}
+.os-layout{gap:12px;grid-template-columns:minmax(0,1fr) minmax(240px,280px)}
+.ourscript-view main{padding-top:16px}
+.os-controls .os-fields{gap:8px 10px}
+.os-group{padding:10px 0}.os-group h3{margin-bottom:9px}
+.os-original-columns .os-group{padding:10px;margin-bottom:10px;border-radius:8px}
+.os-original-columns .os-group h3{padding-bottom:8px}
+.os-tabs{padding-bottom:9px;margin-bottom:10px}.os-tabs button{padding:6px 8px}
+.os-preview-column{top:12px}.os-preview-stage{height:270px;border-radius:8px}
+.os-group-heading{margin-bottom:8px}.os-preview-source{margin-bottom:9px;padding-bottom:7px}
+.os-timeline,.os-preview-options{margin:8px 0}.os-check{min-height:27px;font-size:11px}
+.os-log-card pre{height:88px;margin-top:8px}.os-resolved{padding:8px;font-size:11px}
+.audio-radio-options{gap:6px}.audio-radio-options label{padding:7px;font-size:11px;border-radius:6px}
+.audio-section-title{font-size:14px;margin:10px 0}.audio-help,.caption-help{margin-bottom:10px}
+.caption-preset-info{padding:9px;border-radius:7px}.caption-override-grid{gap:10px}
+.dub-layout{gap:12px}.dub-frame{min-height:180px;margin:8px 0}.dub-preview pre{height:120px}
+/* Keep the execution bar aligned with the compact shell at every desktop width. */
+body.studio-view header{left:var(--ui-sidebar);height:48px}
+.studio-toolbar{left:calc(var(--ui-sidebar) + var(--ui-gutter));right:var(--ui-gutter);top:48px;padding:9px 12px;border-radius:0 0 8px 8px;box-shadow:none}
+.studio-toolbar-title{gap:10px;margin-bottom:6px}
+.studio-execution button{font-size:10px;padding:5px 8px}
+body.studio-view main{padding-top:calc(var(--studio-toolbar-height,150px) + 62px)}
+.studio-grid,.studio-editor-grid,.studio-output-grid{gap:10px;margin-bottom:10px}
+.studio-card{margin:0;padding:12px}.studio-card h3{margin-bottom:9px}
+.studio-card .form-grid{gap:9px}.studio-card input,.studio-card select,.studio-card textarea{padding:6px 8px}
+.studio-project-row{margin-bottom:10px}.studio-project-row .studio-card{padding-bottom:10px}
+.studio-script textarea{height:210px;min-height:140px}.studio-scenes .scene-table-scroll{height:210px;max-height:210px}
+#studio-log{height:140px}.studio-batch-card{margin-bottom:10px}
+.batch-continue{margin:8px 0}.batch-table-scroll th,.batch-table-scroll td{padding:6px}
+.activity{margin-top:14px}.queue-note{margin:0 0 10px}
+.empty{padding:12px;border-radius:7px}.empty-icon{font-size:17px}.empty p{font-size:11px}
+.job{padding:10px;margin-top:8px;border-radius:7px}
+dialog{padding:16px;border-radius:10px}pre{padding:12px;line-height:1.6}
+/* Use wide screens for controls instead of oversized gutters and stacked rows. */
+@media(min-width:1250px){
+  .original-script{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .audio-mix-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .cleanup-band{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .transition-tiles{grid-template-columns:repeat(4,minmax(0,1fr))}
+}
+@media(max-width:1100px){
+  :root{--ui-sidebar:170px;--ui-gutter:14px}
+  .brand{font-size:11px;gap:6px}.brand small{font-size:5.5px}
+  .brand-mark{width:26px;height:28px}.os-layout{grid-template-columns:minmax(0,1fr) 240px}
+}
+@media(max-width:900px){
+  .os-layout{grid-template-columns:1fr}.os-preview-column{position:static}
+  .studio-grid,.studio-output-grid,.studio-project-row .form-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:760px){
+  :root{--ui-sidebar:0px;--ui-gutter:12px}
+  .sidebar{position:static;width:auto;margin:0;padding:10px 12px;border-width:0 0 1px}
+  .brand{font-size:13px;padding-bottom:8px}.brand small{font-size:6px}
+  nav{flex-direction:row;gap:4px}nav a{padding:6px 9px;flex-shrink:0}
+  .workspace{margin-left:0}header{height:44px}main{padding-top:12px}
+  .page-heading{align-items:flex-start}.page-heading h1{font-size:20px}
+  .page-heading .pill{white-space:normal;text-align:center}
+  body.studio-view header{position:static;height:44px}
+  .studio-toolbar{position:sticky;left:auto;right:auto;top:0;margin-bottom:12px}
+  body.studio-view main{padding-top:12px}
+  .studio-editor-grid,.studio-grid,.studio-output-grid,.studio-project-row .form-grid{grid-template-columns:1fr}
+  .studio-grid>.studio-card:last-child .form-grid,.studio-output-grid .form-grid{grid-template-columns:1fr}
+  .studio-toolbar-title{flex-wrap:wrap}.studio-scenes .scene-table{min-width:0}
+  .form-grid,.settings-grid{grid-template-columns:1fr}.card-heading{flex-wrap:wrap}
+  .job-top{flex-wrap:wrap}.job-buttons{flex-wrap:wrap}
+}
+.page-heading #engine-status{margin-left:auto}
+#card-density-tools{flex-shrink:0}
+#card-density-tools button{font-size:10px;padding:5px 8px;color:var(--muted)}
+@media(min-width:1000px){
+ .organized-settings:has(.original-quick)>.original-full{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:start}
+ .organized-settings:has(.original-quick)>.original-full>.card{margin:0;min-width:0}
+ .organized-settings:has(.original-quick)>.original-full .group-fields{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:760px){.page-heading{flex-wrap:wrap}#card-density-tools{width:100%}.page-heading #engine-status{display:none}}
+/* Keep the landing workflow and its empty activity state within a desktop view. */
+@media(min-width:1100px){
+ .original-quick [data-group-title="Processing Options"] .group-fields{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+.activity .empty{display:flex;align-items:center;justify-content:center;gap:8px;padding:10px}
+.activity .empty p{margin:0}.activity .empty-icon{font-size:16px}
+.activity .card-heading{margin-bottom:8px}.activity .eyebrow{display:none}

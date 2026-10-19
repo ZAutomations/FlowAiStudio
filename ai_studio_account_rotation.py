@@ -1,0 +1,95 @@
+"""Quota-only handover for reference-based Flow Agent image projects."""
+import json
+from pathlib import Path
+from ai_studio_pipeline import atomic_json, fingerprint, check_cancel, valid_image
+from desktop.browser_accounts import profiles, browser_options
+
+
+def account_order(config):
+    rows=profiles()
+    lookup={row['id']:row['id'] for row in rows}
+    lookup.update({row['label'].casefold():row['id'] for row in rows})
+    raw=config.get('account_fallback_order','')
+    if not isinstance(raw,str):raise ValueError('Account fallback order must contain saved account labels separated by commas.')
+    order=[]
+    for value in raw.replace('\n',',').split(','):
+        value=value.strip()
+        if not value:continue
+        account=lookup.get(value) or lookup.get(value.casefold())
+        if account is None:raise ValueError('Unknown fallback account: '+value+'. Add its profile and sign in first.')
+        if account not in order:order.append(account)
+    return order
+
+
+def restore(config):
+    """Use the manifest binding even if the UI/job carries an older account."""
+    file=Path(config['project'])/'studio_agent_images.json'
+    if not file.is_file():return
+    state=json.loads(file.read_text('utf-8'))
+    active=state.get('account_binding')
+    if not active:return
+    supplied=config.get('browser_account','')
+    allowed={row.get('account','') for row in state.get('account_sessions',[])}|{active['account']}
+    if supplied not in allowed:
+        raise ValueError('This project has a saved account handover. Select its original or active account to resume.')
+    config.update(browser_account=active['account'],flow_url=active['flow_url'],
+                  _rotation_scope=True,_rotation_restored=True,
+                  _reference_flow_url=state['reference_flow_url'])
+    browser_options({**config,'provider':'flow'})
+
+
+def handover(config,cancel,log):
+    """Called only after all model quotas and a verified idle missing batch."""
+    if not config.get('account_fallback'):
+        raise RuntimeError('All configured image models reached quota. Account fallback is disabled. Progress saved.')
+    if not config.get('image_agent') or config.get('provider')!='flow':
+        raise ValueError('Account fallback currently supports reference-based Flow Agent image batches only.')
+    check_cancel(cancel)
+    file=Path(config['project'])/'studio_agent_images.json'
+    state=json.loads(file.read_text('utf-8'))
+    verified=set(state.get('quota_verified_missing',[]))
+    if not verified:raise RuntimeError('Account handover requires verified missing requests after model quota exhaustion.')
+    records=state['records']
+    for record in records:
+        uncertain=record.get('status') in ('submitting','submitted','matched') or record.get('preparation_started')
+        if record['status']!='complete' and uncertain and record['index'] not in verified:
+            raise RuntimeError('Recover other uncertain scene requests before switching accounts. Progress retained.')
+    current=config.get('browser_account','')
+    sessions=state.get('account_sessions',[])
+    exhausted={row['account'] for row in sessions if row.get('status')=='quota_exhausted'}|{current}
+    next_account=next((account for account in account_order(config) if account not in exhausted),None)
+    if next_account is None:
+        raise RuntimeError('All selected fallback accounts have been tried. Progress saved; wait for quota or add another signed-in profile.')
+    opts=browser_options({**config,'browser_account':next_account,'provider':'flow'})
+    if not Path(opts['profile_dir']).is_dir():
+        raise RuntimeError('The next account has no saved browser profile. Select it, click Login (once), and sign in before resuming.')
+    from ai_studio_animate_setup import ensure_project
+    next_config={**config,'browser_account':next_account,'flow_url':'','auto_project':True,
+                 '_rotation_scope':True,'_rotation_restored':False}
+    label=next(row['label'] for row in profiles() if row['id']==next_account)
+    log('Account model quotas exhausted. Preparing saved account '+label+'; existing local images and reference files are retained.')
+    url=ensure_project(next_config,cancel,log)
+    check_cancel(cancel)
+    old_url=config['flow_url']
+    # Archive every request identity before changing its account/project binding.
+    atomic_json(file.parent/'account_history'/(fingerprint(state)+'.json'),state)
+    sessions=[row for row in sessions if row['account']!=current]
+    sessions.append({'account':current,'flow_url':old_url,'status':'quota_exhausted',
+                     'models':state.get('exhausted_image_models',[])})
+    state.update(account_sessions=sessions,account_binding={'account':next_account,'flow_url':url},
+                 reference_flow_url=state.get('reference_flow_url',old_url),
+                 identity=fingerprint([(r['key'],r['index']) for r in records],url),
+                 exhausted_image_models=[],active_image_model=state.get('preferred_image_model','Nano Banana Pro'))
+    state.pop('quota_verified_missing',None)
+    for record in records:
+        if record['status']=='complete':
+            if not valid_image(record['output']):raise RuntimeError('A completed local image is missing; recover it before switching accounts.')
+            record.setdefault('source_account',current);record.setdefault('source_flow_url',old_url)
+        else:
+            record['status']='pending'
+            record['handover_unsubmitted']=True
+            for key in ('asset_id','preparation_started','generation_model','pause_reason','last_error'):record.pop(key,None)
+    atomic_json(file,state) # one authoritative, restart-safe handover commit
+    config.update(browser_account=next_account,flow_url=url,_rotation_scope=True,_rotation_restored=True,
+                  _reference_flow_url=state['reference_flow_url'])
+    log('Account switched to '+label+'. Using its saved Flow project; only unfinished images will be generated. Exact named local references will be uploaded by the Agent preparation step.')

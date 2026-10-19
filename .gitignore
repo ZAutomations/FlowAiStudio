@@ -1,0 +1,31 @@
+# Local credentials, settings, sessions and work
+.desktop/
+private/
+overlay_settings.json
+.env
+.env.*
+*service_account*.json
+*-sa.json
+Projects/
+verification/
+cache/
+zbot_profiles/
+**/logs/
+**/stories/
+**/.saved_couple*
+# Installed dependencies and portable binary/model bundle
+runtime/
+VoiceModules/
+**/node_modules/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.log
+*.tmp
+*.bak
+BUNDLE_MANIFEST.json
+# Machine-specific extraction notes
+EXTRACTION_PLAN.md
+Thumbs.db
+.DS_Store

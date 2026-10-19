@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en" data-theme="crimson">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="desktop-session" content="__SESSION__"><title>Flow AI Studio</title>
+<link rel="stylesheet" href="/assets/style.css"><link rel="stylesheet" href="/assets/original-controls.css"><link rel="stylesheet" href="/assets/card-visibility.css"><link rel="stylesheet" href="/assets/studio.css"><link rel="stylesheet" href="/assets/compact.css"><link rel="stylesheet" href="/assets/standalone.css">
+<script src="/assets/app.js" defer></script><script src="/assets/common.js" defer></script><script src="/assets/card-visibility.js" defer></script><script src="/assets/studio-batch.js" defer></script><script src="/assets/studio.js" defer></script><script src="/assets/studio-cast.js" defer></script><script src="/assets/animate-batch.js" defer></script><script src="/assets/animate.js" defer></script><script src="/assets/start.js" defer></script></head>
+<body>
+<aside class="sidebar">
+  <a class="brand" href="#studio"><span class="brand-mark">▶</span><span>FLOW<span class="accent">AI STUDIO</span><small>YOUR LOCAL CREATIVE WORKSPACE</small></span></a>
+  <button class="primary new-job" id="new-job">＋ New story</button>
+  <div class="nav-label">WORKSPACE</div><nav id="navigation"></nav>
+  <div class="sidebar-bottom"><span class="local-dot"></span> Local backend <span class="version">DESKTOP</span><p>Files and credentials stay on this computer.</p><button id="app-settings" class="subtle">⚙ Voice, captions & credentials</button></div>
+</aside>
+<div class="workspace">
+  <header><div class="breadcrumbs">Workspace <span>/</span> <strong id="breadcrumb">AI Studio</strong></div><div class="header-actions"><span id="connection" class="connection">● Connected</span><label class="theme-label" for="theme">Theme</label><select id="theme" aria-label="Colour theme"><option value="crimson">Crimson</option><option value="ember">Ember</option><option value="matte">Matte</option></select></div></header>
+  <main><div class="page-heading"><div><div class="eyebrow">FLOW AI STUDIO</div><h1 id="title">AI Studio</h1><p id="subtitle">Create images, animated stories and narrated videos.</p></div><span class="pill" id="engine-status">LOCAL ENGINE</span></div>
+    <section id="content" aria-live="polite"></section>
+    <section class="card activity"><div class="card-heading"><div><div class="eyebrow">LIVE ACTIVITY</div><h2>Job queues</h2></div><div class="actions"><span id="job-count" class="pill">0 active</span><button id="clear-jobs" type="button" disabled title="Remove finished job history; keep active jobs and project files">Clear finished jobs</button></div></div><p class="muted queue-note">Independent operations run together when their engines and output folders are safe to share.</p><div id="jobs"></div></section>
+  </main>
+</div>
+<div id="toast" role="status"></div>
+<dialog id="logs-dialog"><div class="card-heading"><h2 id="log-title">Job log</h2><button id="close-logs" aria-label="Close logs">✕</button></div><div id="log-summary"></div><pre id="log-output" tabindex="0"></pre></dialog>
+<dialog id="settings-dialog"><div class="card-heading"><h2>App settings</h2><button id="settings-close">✕</button></div><div class="settings-tabs"><button data-config="voice">Voice & audio</button><button data-config="captions">Pro Captions (ASS)</button><button data-config="credentials">Credentials</button></div><form id="config-form"><div id="configuration-fields" class="form-grid"></div><div class="actions"><button id="config-save" type="submit" class="primary">Save settings</button></div></form></dialog></body></html>

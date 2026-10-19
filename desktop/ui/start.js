@@ -1,0 +1,10 @@
+'use strict';
+$('#clear-jobs').onclick=()=>run(async()=>{await api('jobs/clear-finished',{});await poll();toast('Finished job history cleared; project files retained.');});
+$('#close-logs').onclick=()=>$('#logs-dialog').close();
+$('#new-job').onclick=()=>run(async()=>{if(current==='studio')await studioNewProject();else location.hash='studio';});
+$('#app-settings').onclick=()=>openSettings();$('#settings-close').onclick=()=>$('#settings-dialog').close();
+$('#settings-dialog').querySelectorAll('[data-config]').forEach(b=>b.onclick=()=>openSettings(b.dataset.config));
+$('#config-form').onsubmit=e=>{e.preventDefault();run(async()=>{const patch=values(e.target);if(configSection==='credentials'){await api('credentials',patch);e.target.elements.value.value='';}else{await api('settings/settings',patch);Object.assign(state.settings,patch);}state=await api('state');toast('Settings saved locally.');$('#settings-dialog').close();});};
+$('#theme').onchange=()=>run(async()=>{const theme=$('#theme').value;await api('settings/preferences',{theme});document.documentElement.dataset.theme=theme;state.preferences.theme=theme;});
+window.addEventListener('hashchange',()=>{keepDraft();current=location.hash.slice(1);render();});
+run(async()=>{state=await api('state');configuration=await api('configuration');drafts=state.drafts||{};current=location.hash.slice(1)||'studio';document.documentElement.dataset.theme=state.preferences.theme||'crimson';$('#theme').value=document.documentElement.dataset.theme;render();renderJobs(state.jobs);setInterval(poll,1100);});

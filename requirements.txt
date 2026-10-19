@@ -1,0 +1,15 @@
+fastapi==0.143.0
+uvicorn==0.54.0
+pywebview==6.2.1
+requests==2.34.2
+httpx==0.28.1
+openpyxl==3.1.5
+Pillow==10.4.0
+numpy==2.2.6
+soundfile==0.14.0
+kokoro-onnx==0.5.0
+onnxruntime==1.27.0
+google-auth==2.55.2
+pydub==0.25.1
+psutil
+playwright>=1.48.0

@@ -1,0 +1,714 @@
+{
+  "voice": [
+    {
+      "key": "tts_engine",
+      "label": "Default voice engine",
+      "type": "combo",
+      "default": "google_cloud",
+      "choices": [
+        [
+          "google_cloud",
+          "Gemini TTS"
+        ],
+        [
+          "local",
+          "Kokoro"
+        ],
+        [
+          "piper",
+          "Piper"
+        ]
+      ]
+    },
+    {
+      "key": "bgm_file",
+      "page": "script",
+      "group": "Freeze-Shake & Overlay",
+      "label": "bgm file",
+      "default": "",
+      "order": 4082.072,
+      "layout": {
+        "order": 5635,
+        "parent": "cols[2]",
+        "row": 4,
+        "col": 2
+      }
+    },
+    {
+      "key": "bgm_volume",
+      "page": "audio",
+      "group": "BGM",
+      "label": "Volume",
+      "type": "number",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.3,
+      "step": 0.01,
+      "order": 11844,
+      "layout": {
+        "order": 11842,
+        "colspan": 4
+      }
+    },
+    {
+      "key": "kokoro_voice",
+      "page": "audio",
+      "group": "Kokoro TTS Settings",
+      "label": "kokoro voice",
+      "order": 11912,
+      "type": "select",
+      "choices": [
+        "af_alloy - Female (American, Versatile)",
+        "af_aoede - Female (American, Melodic)",
+        "af_bella - Female (American, Warm)",
+        "af_heart - Female (American, Heartfelt)",
+        "af_jessica - Female (American, Conversational)",
+        "af_kore - Female (American, Expressive)",
+        "af_nicole - Female (American, Soft)",
+        "af_nova - Female (American, Friendly)",
+        "af_river - Female (American, Smooth)",
+        "af_sarah - Female (American, Clear)",
+        "af_sky - Female (American, Youthful)",
+        "am_adam - Male (American, Professional)",
+        "am_echo - Male (American, Resonant)",
+        "am_eric - Male (American, Casual)",
+        "am_fenrir - Male (American, Deep)",
+        "am_liam - Male (American, Warm)",
+        "am_michael - Male (American, Energetic)",
+        "am_onyx - Male (American, Rich)",
+        "am_puck - Male (American, Playful)",
+        "bf_alice - Female (British, Gentle)",
+        "bf_emma - Female (British, Elegant)",
+        "bf_isabella - Female (British, Sophisticated)",
+        "bf_lily - Female (British, Sweet)",
+        "bm_daniel - Male (British, Refined)",
+        "bm_fable - Male (British, Storyteller)",
+        "bm_george - Male (British, Distinguished)",
+        "bm_lewis - Male (British, Authoritative)",
+        "hf_alpha - Female (Hindi)",
+        "hf_beta - Female (Hindi)",
+        "jf_alpha - Female (Japanese)",
+        "jf_gongitsune - Female (Japanese, Storyteller)",
+        "jf_nezumi - Female (Japanese)",
+        "jf_tebukuro - Female (Japanese)",
+        "jm_kumo - Male (Japanese)",
+        "zf_xiaobei - Female (Chinese)",
+        "zf_xiaoni - Female (Chinese)",
+        "zf_xiaoxiao - Female (Chinese)",
+        "zm_yunjian - Male (Chinese)",
+        "zm_yunxi - Male (Chinese)",
+        "zm_yunyang - Male (Chinese)",
+        "ef_dora - Female (Spanish)",
+        "em_alex - Male (Spanish)",
+        "em_santa - Male (Spanish)",
+        "ff_siwis - Female (French)",
+        "if_sara - Female (Italian)",
+        "im_nicola - Male (Italian)",
+        "pf_dora - Female (Brazilian Portuguese)",
+        "pm_alex - Male (Brazilian Portuguese)",
+        "pm_santa - Male (Brazilian Portuguese)"
+      ],
+      "layout": {
+        "order": 11912,
+        "colspan": 4
+      }
+    },
+    {
+      "key": "kokoro_speed",
+      "page": "audio",
+      "group": "Kokoro TTS Settings",
+      "label": "kokoro speed",
+      "default": 1.0,
+      "order": 11914,
+      "type": "number",
+      "min": 0.5,
+      "max": 2.0,
+      "step": 0.1,
+      "layout": {
+        "order": 11912,
+        "colspan": 4
+      }
+    },
+    {
+      "key": "piper_voice",
+      "page": "audio",
+      "group": "Piper TTS Settings",
+      "label": "piper voice",
+      "default": "en_US-ryan-medium",
+      "order": 11942,
+      "type": "select",
+      "choices": [
+        "ar_JO-kareem-medium",
+        "en_GB-cori-high",
+        "en_US-amy-medium",
+        "en_US-libritts_r-medium",
+        "en_US-ljspeech-high",
+        "en_US-reza_ibrahim-medium",
+        "en_US-ryan-medium",
+        "en_US-sam-medium",
+        "hi_IN-priyamvada-medium",
+        "ru_RU-dmitri-medium",
+        "ur_PK-fasih-medium"
+      ],
+      "layout": {
+        "order": 11942,
+        "colspan": 4
+      }
+    },
+    {
+      "key": "piper_speaker",
+      "page": "audio",
+      "group": "Piper TTS Settings",
+      "label": "piper speaker",
+      "default": "",
+      "order": 11943,
+      "layout": {
+        "order": 11942,
+        "colspan": 4
+      }
+    },
+    {
+      "key": "piper_speed",
+      "page": "audio",
+      "group": "Piper TTS Settings",
+      "label": "piper speed",
+      "default": 1.0,
+      "order": 11944,
+      "type": "number",
+      "min": 0.5,
+      "max": 2.0,
+      "step": 0.1,
+      "layout": {
+        "order": 11942,
+        "colspan": 4
+      }
+    },
+    {
+      "key": "piper_noise_scale",
+      "page": "audio",
+      "group": "Piper TTS Settings",
+      "label": "piper noise scale",
+      "default": 0.667,
+      "order": 11945,
+      "type": "number",
+      "min": 0.0,
+      "max": 1.5,
+      "step": 0.01,
+      "layout": {
+        "order": 11942,
+        "colspan": 4
+      }
+    },
+    {
+      "key": "gemini_tts_voice",
+      "page": "audio",
+      "group": "Gemini API TTS Settings",
+      "label": "Voice",
+      "order": 11963,
+      "layout": {
+        "order": 11962,
+        "colspan": 4
+      },
+      "type": "select",
+      "choices": [
+        "Zephyr",
+        "Charon",
+        "Fenrir",
+        "Puck",
+        "Kore",
+        "Leda",
+        "Orus",
+        "Aoede",
+        "Callirrhoe",
+        "Autonoe",
+        "Enceladus",
+        "Iapetus",
+        "Umbriel",
+        "Algieba",
+        "Despina",
+        "Erinome",
+        "Algenib",
+        "Rasalgethi",
+        "Laomedeia",
+        "Achernar",
+        "Alnilam",
+        "Schedar",
+        "Gacrux",
+        "Pulcherrima",
+        "Achird",
+        "Zubenelgenubi",
+        "Vindemiatrix",
+        "Sadachbia",
+        "Sadaltager",
+        "Sulafat"
+      ],
+      "choiceLabels": {
+        "Zephyr": "Zephyr — Bright",
+        "Charon": "Charon — Informative",
+        "Fenrir": "Fenrir — Excitable",
+        "Puck": "Puck — Upbeat",
+        "Kore": "Kore — Firm",
+        "Leda": "Leda — Youthful",
+        "Orus": "Orus — Firm",
+        "Aoede": "Aoede — Breezy",
+        "Callirrhoe": "Callirrhoe — Easy-going",
+        "Autonoe": "Autonoe — Bright",
+        "Enceladus": "Enceladus — Breathy",
+        "Iapetus": "Iapetus — Clear",
+        "Umbriel": "Umbriel — Easy-going",
+        "Algieba": "Algieba — Smooth",
+        "Despina": "Despina — Smooth",
+        "Erinome": "Erinome — Clear",
+        "Algenib": "Algenib — Gravelly",
+        "Rasalgethi": "Rasalgethi — Informative",
+        "Laomedeia": "Laomedeia — Upbeat",
+        "Achernar": "Achernar — Soft",
+        "Alnilam": "Alnilam — Firm",
+        "Schedar": "Schedar — Even",
+        "Gacrux": "Gacrux — Mature",
+        "Pulcherrima": "Pulcherrima — Forward",
+        "Achird": "Achird — Friendly",
+        "Zubenelgenubi": "Zubenelgenubi — Casual",
+        "Vindemiatrix": "Vindemiatrix — Gentle",
+        "Sadachbia": "Sadachbia — Lively",
+        "Sadaltager": "Sadaltager — Knowledgeable",
+        "Sulafat": "Sulafat — Warm"
+      }
+    },
+    {
+      "key": "gemini_tts_model",
+      "page": "audio",
+      "group": "Gemini API TTS Settings",
+      "label": "Model",
+      "default": "gemini-3.1-flash-tts-preview",
+      "order": 11965,
+      "type": "select",
+      "choices": [
+        "gemini-3.1-flash-tts-preview",
+        "gemini-2.5-flash-preview-tts",
+        "gemini-2.5-pro-preview-tts"
+      ],
+      "layout": {
+        "order": 11962,
+        "colspan": 4
+      }
+    },
+    {
+      "key": "gemini_tts_prompt",
+      "page": "audio",
+      "group": "Gemini API TTS Settings",
+      "label": "Style / emotion prompt",
+      "default": "Read aloud in a warm, welcoming tone.",
+      "order": 11966,
+      "type": "combo",
+      "choices": [
+        "Read aloud in a warm, welcoming tone.",
+        "Read in a sad, emotional tone with deep feeling.",
+        "Read in a calm storytelling tone, like narrating a tale.",
+        "Read with suspense and tension, keeping the listener on edge.",
+        "Read in a motivational, inspiring tone full of energy.",
+        "Read in a dramatic, intense tone with powerful delivery.",
+        "Read in a happy, cheerful, upbeat tone.",
+        "Read with authority and seriousness, like a news anchor.",
+        "Read in a soft, romantic, gentle tone.",
+        "Read in the style of Urdu poetry, with lyrical emotion.",
+        "Read in a mysterious, whispery tone.",
+        "Read in an excited, energetic, enthusiastic tone.",
+        "Read in a humorous, lighthearted, playful tone."
+      ],
+      "layout": {
+        "order": 11962,
+        "colspan": 4
+      }
+    },
+    {
+      "key": "gemini_tts_speed",
+      "page": "audio",
+      "group": "Gemini API TTS Settings",
+      "label": "Speed",
+      "default": 1.2,
+      "order": 11967,
+      "type": "number",
+      "min": 0.25,
+      "max": 4.0,
+      "step": 0.05,
+      "layout": {
+        "order": 11962,
+        "colspan": 4
+      }
+    },
+    {
+      "key": "gemini_tts_language",
+      "label": "Gemini narration language",
+      "default": "ur-PK"
+    }
+  ],
+  "captions": [
+    {
+      "key": "clipper_captions_enabled",
+      "page": "captions",
+      "group": "Pro Captions (ASS)",
+      "label": "Enable Pro ASS Captions (replaces per-frame)",
+      "default": true,
+      "order": 13700,
+      "type": "check",
+      "layout": {
+        "order": 13698,
+        "parent": "grid_container",
+        "col": 2,
+        "colspan": 2
+      }
+    },
+    {
+      "key": "clipper_caption_preset",
+      "page": "captions",
+      "group": "Pro Captions (ASS)",
+      "label": "Style preset",
+      "default": "bold_white",
+      "order": 13701,
+      "layout": {
+        "order": 13698,
+        "parent": "grid_container",
+        "col": 2,
+        "colspan": 2
+      },
+      "type": "select",
+      "choices": [
+        "bold_white",
+        "karaoke_yellow",
+        "minimal",
+        "hormozi_green",
+        "hormozi_yellow",
+        "beast_red",
+        "raj_clean",
+        "alex_caps",
+        "one_word_punch",
+        "word_reveal",
+        "bebas_clean",
+        "comic_bangers",
+        "slab_impact",
+        "marker_note",
+        "serif_elegant",
+        "neon_pop",
+        "boxed_tiktok",
+        "oswald_news",
+        "green_word"
+      ],
+      "choiceLabels": {
+        "bold_white": "Bold White",
+        "karaoke_yellow": "Karaoke Yellow",
+        "minimal": "Minimal",
+        "hormozi_green": "Hormozi Green",
+        "hormozi_yellow": "Hormozi Yellow",
+        "beast_red": "Beast Pop",
+        "raj_clean": "Raj Shamani Clean",
+        "alex_caps": "Alex Bold Caps",
+        "one_word_punch": "One-Word Punch",
+        "word_reveal": "Word Reveal",
+        "bebas_clean": "Bebas Clean",
+        "comic_bangers": "Comic Punch",
+        "slab_impact": "Slab Impact",
+        "marker_note": "Marker",
+        "serif_elegant": "Serif Elegant",
+        "neon_pop": "Neon Pop",
+        "boxed_tiktok": "Boxed",
+        "oswald_news": "Oswald News",
+        "green_word": "Green Word"
+      }
+    },
+    {
+      "key": "clipper_override_font_family",
+      "page": "captions",
+      "group": "Pro Captions (ASS)",
+      "label": "Font override (empty uses preset)",
+      "default": "",
+      "order": 13705,
+      "type": "font",
+      "choices": [
+        "",
+        "Roboto",
+        "Arial",
+        "Noto Nastaliq Urdu",
+        "Noto Sans",
+        "Poppins",
+        "Montserrat",
+        "Bebas Neue",
+        "Oswald",
+        "Anton"
+      ],
+      "layout": {
+        "order": 13698,
+        "parent": "grid_container",
+        "col": 2,
+        "colspan": 2
+      }
+    },
+    {
+      "key": "clipper_override_bold",
+      "page": "captions",
+      "group": "Pro Captions (ASS)",
+      "label": "Bold",
+      "default": false,
+      "order": 13706,
+      "type": "check",
+      "layout": {
+        "order": 13698,
+        "parent": "grid_container",
+        "col": 2,
+        "colspan": 2
+      }
+    },
+    {
+      "key": "clipper_override_stroke",
+      "page": "captions",
+      "group": "Pro Captions (ASS)",
+      "label": "Stroke width (0 uses preset)",
+      "default": 0,
+      "order": 13707,
+      "layout": {
+        "order": 13698,
+        "parent": "grid_container",
+        "col": 2,
+        "colspan": 2
+      },
+      "type": "number",
+      "min": 0,
+      "max": 15,
+      "step": 1
+    },
+    {
+      "key": "clipper_override_bg_enabled",
+      "page": "captions",
+      "group": "Pro Captions (ASS)",
+      "label": "BG Pill",
+      "default": false,
+      "order": 13708,
+      "type": "check",
+      "layout": {
+        "order": 13698,
+        "parent": "grid_container",
+        "col": 2,
+        "colspan": 2
+      }
+    },
+    {
+      "key": "clipper_override_bg_color",
+      "page": "captions",
+      "group": "Pro Captions (ASS)",
+      "label": "Background colour",
+      "default": "",
+      "order": 13709,
+      "layout": {
+        "order": 13698,
+        "parent": "grid_container",
+        "col": 2,
+        "colspan": 2
+      },
+      "type": "optional-color"
+    },
+    {
+      "key": "clipper_override_bg_opacity",
+      "page": "captions",
+      "group": "Pro Captions (ASS)",
+      "label": "Background opacity (%)",
+      "default": 80,
+      "order": 13710,
+      "type": "slider",
+      "min": 0,
+      "max": 100,
+      "step": 1,
+      "layout": {
+        "order": 13698,
+        "parent": "grid_container",
+        "col": 2,
+        "colspan": 2
+      }
+    },
+    {
+      "key": "clipper_caption_animation",
+      "page": "captions",
+      "group": "Pro Captions (ASS)",
+      "label": "Animation",
+      "default": "none",
+      "order": 13711,
+      "layout": {
+        "order": 13698,
+        "parent": "grid_container",
+        "col": 2,
+        "colspan": 2
+      },
+      "type": "select",
+      "choices": [
+        "none",
+        "highlight",
+        "word_reveal",
+        "one_word",
+        "karaoke"
+      ],
+      "choiceLabels": {
+        "none": "Static — all words shown",
+        "highlight": "Highlight — active word glows",
+        "word_reveal": "Word Reveal — words appear as spoken",
+        "one_word": "One Word — a single word at a time",
+        "karaoke": "Karaoke — words fill left to right"
+      }
+    },
+    {
+      "key": "clipper_override_highlight_color",
+      "page": "captions",
+      "group": "Pro Captions (ASS)",
+      "label": "Highlight colour",
+      "default": "",
+      "order": 13702,
+      "layout": {
+        "order": 13698,
+        "parent": "grid_container",
+        "col": 2,
+        "colspan": 2
+      },
+      "type": "optional-color"
+    },
+    {
+      "key": "clipper_override_primary_color",
+      "page": "captions",
+      "group": "Pro Captions (ASS)",
+      "label": "Primary colour",
+      "default": "",
+      "order": 13703,
+      "layout": {
+        "order": 13698,
+        "parent": "grid_container",
+        "col": 2,
+        "colspan": 2
+      },
+      "type": "optional-color"
+    },
+    {
+      "key": "clipper_override_stroke_color",
+      "page": "captions",
+      "group": "Pro Captions (ASS)",
+      "label": "Stroke colour",
+      "default": "",
+      "order": 13704,
+      "layout": {
+        "order": 13698,
+        "parent": "grid_container",
+        "col": 2,
+        "colspan": 2
+      },
+      "type": "optional-color"
+    },
+    {
+      "key": "caption_layout",
+      "page": "captions",
+      "group": "Global Settings",
+      "label": "caption layout",
+      "default": "2-line",
+      "order": 13405,
+      "type": "radio",
+      "choices": [
+        "1-line",
+        "2-line",
+        "multi-line"
+      ],
+      "layout": {
+        "order": 13388,
+        "parent": "grid_container",
+        "row": 1,
+        "col": 1
+      }
+    },
+    {
+      "key": "caption_font_size",
+      "page": "captions",
+      "group": "Global Settings",
+      "label": "Caption Font Size (Global)",
+      "type": "slider",
+      "min": 30,
+      "max": 200,
+      "default": 60,
+      "step": 1,
+      "order": 13430,
+      "layout": {
+        "order": 13388,
+        "parent": "grid_container",
+        "row": 1,
+        "col": 1
+      }
+    },
+    {
+      "key": "caption_position",
+      "page": "captions",
+      "group": "Global Settings",
+      "label": "caption position",
+      "default": "bottom",
+      "order": 13448,
+      "layout": {
+        "order": 13388,
+        "parent": "grid_container",
+        "row": 1,
+        "col": 1
+      },
+      "type": "radio",
+      "choices": [
+        "top",
+        "center",
+        "bottom"
+      ]
+    },
+    {
+      "key": "caption_y_offset",
+      "page": "captions",
+      "group": "Global Settings",
+      "label": "Y Offset",
+      "type": "slider",
+      "min": -500,
+      "max": 500,
+      "default": 0,
+      "step": 1,
+      "order": 13463,
+      "layout": {
+        "order": 13388,
+        "parent": "grid_container",
+        "row": 1,
+        "col": 1
+      }
+    },
+    {
+      "key": "caption_sync_offset",
+      "page": "captions",
+      "group": "Global Settings",
+      "label": "Sync Offset (s)",
+      "type": "slider",
+      "min": -0.5,
+      "max": 0.5,
+      "default": 0.0,
+      "step": 0.01,
+      "order": 13472,
+      "layout": {
+        "order": 13388,
+        "parent": "grid_container",
+        "row": 1,
+        "col": 1
+      }
+    },
+    {
+      "key": "caption_words_per_line",
+      "page": "captions",
+      "group": "Global Settings",
+      "label": "Words Per Caption",
+      "type": "slider",
+      "min": 1,
+      "max": 5,
+      "default": 3,
+      "step": 1,
+      "order": 13475,
+      "layout": {
+        "order": 13388,
+        "parent": "grid_container",
+        "row": 1,
+        "col": 1
+      }
+    }
+  ]
+}
