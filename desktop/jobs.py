@@ -14,6 +14,10 @@ from .storage import ROOT, atomic, public, read, redact
 KINDS = {'studio': {'voice', 'render', 'browser'}, 'animate': {'voice', 'render', 'browser'}, 'studio-batch': {'voice', 'render', 'browser'}, 'animate-batch': {'voice', 'render', 'browser'}}
 TERMINAL = {'completed', 'failed', 'stopped', 'interrupted'}
 
+def worker_python():
+    from bootstrap import PYTHON
+    return str(PYTHON) if PYTHON.is_file() else sys.executable
+
 def download_scan_message(summary):
     message = f"Scan finished: {summary.get('saved', 0)} scene images saved; {summary.get('downloaded', 0)} new downloads."
     if summary.get('gaps'):
@@ -131,7 +135,7 @@ class Jobs:
         overlay(settings, job['settings'])
         request = {'kind': job['kind'], 'payload': job['payload'], 'settings': settings, 'cancel': str(self.directory / (job['id'] + '.cancel'))}
         try:
-            process = subprocess.Popen([sys.executable, '-X', 'utf8', '-u', '-m', 'desktop.worker'], cwd=ROOT, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace', creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+            process = subprocess.Popen([worker_python(), '-X', 'utf8', '-u', '-m', 'desktop.worker'], cwd=ROOT, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace', creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
             with self.lock:
                 self.processes[job['id']] = process
             process.stdin.write(json.dumps(request) + '\n')

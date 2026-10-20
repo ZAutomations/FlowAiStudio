@@ -33,3 +33,20 @@ class FixedDSPTests(unittest.TestCase):
             self.assertNotEqual(output.read_bytes(),original)
 
 
+
+    def test_three_main_characters_reused_and_remaining_assets_untouched(self):
+        import json
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as folder:
+            root=Path(folder);rows=[];refs=[]
+            for i,name in enumerate(['DSPMalik','Ali','Mother']):
+                source=root/(name+'.jpg');Image.new('RGB',(512,512),['red','blue','green'][i]).save(source)
+                rows.append(dict(name=name,path=str(source)))
+                refs.append(dict(name=name,kind='character',output=str(root/'references'/(name+'.png'))))
+            refs.append(dict(name='Witness',kind='character',output=str(root/'references/Witness.png')))
+            apply_fixed_dsp_reference({'project':folder,'main_character_references':json.dumps(rows)},refs,threading.Event(),lambda m:None)
+            for ref in refs[:3]:self.assertTrue(Path(ref['output']).is_file())
+            self.assertFalse(Path(refs[-1]['output']).exists())
+            times=[Path(ref['output']).stat().st_mtime_ns for ref in refs[:3]]
+            apply_fixed_dsp_reference({'project':folder,'main_character_references':rows},refs,threading.Event(),lambda m:None)
+            self.assertEqual(times,[Path(ref['output']).stat().st_mtime_ns for ref in refs[:3]])
+

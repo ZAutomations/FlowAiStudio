@@ -58,12 +58,11 @@ class CopiedReferencePlanTests(unittest.TestCase):
     def test_missing_reference_generation_does_not_resubmit_existing_files(self):
         config={**self.config,'agent_tool_dir':str(self.root),'cast_assets':self.config['cast_assets']+[dict(name='Station',kind='location',description='Brick station.')]}
         before=(self.directory/'DSP.png').read_bytes()
-        with patch('ai_studio_animate_setup.ZBotImageGenerator') as browser,patch('ai_studio_animate_setup.subprocess.run',return_value=Mock(returncode=0)):
-            instance=browser.return_value
-            def generate(items,**kwargs):
-                self.assertEqual(len(items),1);self.assertEqual(Path(items[0][1]).name,'Station.png')
-                Image.new('RGB',(32,32),'blue').save(items[0][1]);return [(True,items[0][1])]
-            instance.generate_batch.side_effect=generate
+        def generate(config,items,cancel,log):
+            pending=[r for r in items if not Path(r['output']).exists()]
+            self.assertEqual(len(pending),1);self.assertEqual(Path(pending[0]['output']).name,'Station.png')
+            Image.new('RGB',(512,288),'blue').save(pending[0]['output'])
+        with patch('ai_studio_reference_agent.generate',side_effect=generate):
             refs=ensure_references(config,threading.Event(),lambda m:None)
         self.assertEqual(len(refs),2)
         self.assertEqual((self.directory/'DSP.png').read_bytes(),before)

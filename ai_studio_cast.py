@@ -48,7 +48,7 @@ def validate(value,scenes=None,script=None):
         name=a.get('name','');description=a.get('description','');aliases=a.get('aliases',[])
         if not isinstance(name,str) or not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,39}',name) or name.casefold() in names or re.fullmatch(r'CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9]',name,re.I):
             raise ValueError('Asset identifiers must be unique simple names such as DSP or PoliceStation.')
-        if a.get('kind') not in ('character','location'):raise ValueError('Asset kind must be character or location.')
+        if a.get('kind') not in ('character','location','prop'):raise ValueError('Asset kind must be character, location or prop.')
         if not isinstance(description,str) or not description.strip() or len(description)>8000:raise ValueError('Every asset needs a design description (at most 8000 characters).')
         if not isinstance(aliases,list) or len(aliases)>40 or any(not isinstance(s,str) or len(s)>200 for s in aliases):raise ValueError('Aliases must be a list of short names.')
         names.add(name.casefold());clean.append(dict(name=name,kind=a['kind'],aliases=aliases,description=description.strip()))
@@ -169,7 +169,7 @@ def analyze_long(adapter,q,config,context):
     return validate({**context,'assets':progress['assets'],'scenes':done},adapter.zb_scenes,config['script'])
 
 
-def analyze(adapter,q,config):
+def analyze(adapter,q,config,allow_existing=False):
     check_cancel(adapter._zb_cancel)
     try:saved=current(config,adapter.zb_scenes)
     except ValueError:
@@ -178,7 +178,7 @@ def analyze(adapter,q,config):
     if saved:
         q.put(('log','info','Saved cast analysis ready. Review characters, locations and scene references, then Approve Cast.'))
         return saved
-    if locked(config):raise ValueError('Use a new video to analyze automatic casting; existing reference/media checkpoints are retained.')
+    if locked(config) and not allow_existing:raise ValueError('Use a new video to analyze automatic casting; existing reference/media checkpoints are retained.')
     context=dict(title=config['title'],script=config['script'],style=config['style'],design=config.get('reference_design',''),
                  continuity=config.get('continuity',''),scenes=[dict(scene=i+1,narration=s['narration']) for i,s in enumerate(adapter.zb_scenes)])
     q.put(('log','info','Analyzing the full script: recurring identities, aliases, locations and visible subjects per scene…'))
@@ -196,10 +196,10 @@ def analyze(adapter,q,config):
     return data
 
 
-def approve(adapter,q,config,value):
+def approve(adapter,q,config,value,allow_existing=False):
     data=validate(value,adapter.zb_scenes,config['script'])
     saved=current(config,adapter.zb_scenes)
-    if locked(config) and (not saved or validate(saved,adapter.zb_scenes,config['script'])!=data):
+    if not allow_existing and locked(config) and (not saved or validate(saved,adapter.zb_scenes,config['script'])!=data):
         raise ValueError('References/media already use this cast. Use a new video to change it; saved work is retained.')
     data.update(source_key=source_key(config,adapter.zb_scenes),approved=True)
     atomic_json(file(config),data)

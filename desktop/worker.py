@@ -72,7 +72,11 @@ def studio(payload, settings, cancel, animated=False, emit=event):
         from ai_studio_pipeline import fingerprint
         if any(s.get('image_path') or s.get('video_path') or s.get('audio_path') for s in saved.get('scenes',[])) or (project/'animate_media.json').exists():
             raise ValueError('Import a ready story into a new empty Animate project; existing generated assets are preserved.')
-        ready=parse_ready(payload.get('animation_ready',''),payload.get('ready_original_script',''))
+        if payload.get('animation_video_ready'):
+            from ai_studio_animate_prompts import parse_split
+            ready=parse_split(payload['animation_video_ready'],payload.get('animation_image_ready',''),payload.get('ready_original_script',''))
+        else:
+            ready=parse_ready(payload.get('animation_ready',''),payload.get('ready_original_script',''))
         payload.update(ready['options'],title=ready['title'] or payload.get('title','Animate story'),script=ready['script'],scene_seed=ready['scenes'],ready_animation_script_key=fingerprint(ready['script']))
         saved={}
     options = saved.get('options', {})
@@ -120,6 +124,9 @@ def studio(payload, settings, cancel, animated=False, emit=event):
         animation_count(config, 0)
         if not config.get('agent_tool_dir'):
             config['agent_tool_dir'] = str(ROOT / 'animate_flow_backend')
+    if animated and saved:
+        from ai_studio_animate_cast import remember_existing
+        remember_existing(config,options)
     from ai_studio_narration import validate as validate_narration
     validate_narration(config)
     if not animated:
@@ -193,6 +200,8 @@ def studio(payload, settings, cancel, animated=False, emit=event):
             scene.update(image_path=str(destination), manual_image=True, image_status='done')
         config['script'] = '\n\n'.join((s['narration'] for s in adapter.zb_scenes))
         adapter.zb_last_video = None
+    config.pop('animation_video_ready', None)
+    config.pop('animation_image_ready', None)
     config.pop('animation_ready', None)
     config.pop('ready_original_script', None)
     config.pop('account_selection_from', None)
@@ -200,9 +209,13 @@ def studio(payload, settings, cancel, animated=False, emit=event):
     config.pop('package_seed', None)
     config.pop('scene_edit', None)
     config.pop('source_project', None)
+    config.pop('ledger_review', None)
     config.pop('cast_review', None)
     config.pop('ready_story', None)
     q = Events(emit)
+    if animated and payload.get('action')=='import-ready-animation' and ready.get('assets') is not None:
+        from ai_studio_animate_cast import import_cast
+        import_cast(adapter,q,config,{'assets':ready['assets'],'scenes':[{'scene':i+1,'narration':s['narration'],'references':s.get('reference_names',[]),'visual_prompt':s['visual_prompt']} for i,s in enumerate(adapter.zb_scenes)]})
     action = payload.get('action', 'build')
     if not animated and action == 'build':
         from ai_studio_parts import scene_range
@@ -234,12 +247,39 @@ def studio(payload, settings, cancel, animated=False, emit=event):
         phases['build']=[adapter._zb_fill_prompts,adapter._zb_voice_pass,adapter._zb_images_pass,adapter._zb_render_pass]
     if animated:
         phases['import-ready-animation'] = []
+        from ai_studio_continuity_ledger import build as build_ledger,save_review as save_ledger
+        phases['continuity-ledger']=[lambda q,c:build_ledger(adapter,q,c)]
+        phases['save-continuity-ledger']=[lambda q,c:save_ledger(adapter,q,c,payload.get('ledger_review',{}))]
+        from ai_studio_cast import analyze as analyze_cast,approve as approve_cast,current as current_cast
+        from ai_studio_animate_cast import references as full_references,import_cast,analyze as animate_analyze,approve as animate_approve
+        phases['analyze-cast']=[lambda q,c:animate_analyze(adapter,q,c)]
+        phases['approve-cast']=[lambda q,c:animate_approve(adapter,q,c,payload.get('cast_review',{}))]
+        phases['import-ready']=[lambda q,c:import_cast(adapter,q,c,payload.get('ready_story',''))]
+        phases['references']=[lambda q,c:full_references(adapter,q,c)]
+        phases['export-reference-prompts']=[lambda q,c:full_references(adapter,q,c,'export')]
+        phases['download-reference-images']=[lambda q,c:full_references(adapter,q,c,'download')]
         phases['write-story'] = [adapter._zb_write_story]
+        def cinematic_media(q,c):
+            if c.get('animate_narration_mode')!='cinematic':raise ValueError('Choose Narration-first cinematic mode for separate video/image generation.')
+            adapter._zb_images_pass(q,{**c,'cinematic_media_kind':'video' if action=='cinematic-videos' else 'image'})
+        from ai_studio_parts import compile_part
+        phases['compile-part']=[lambda q,c:compile_part(adapter,q,c,animated=True)]
+        phases['cinematic-videos']=[cinematic_media]
+        phases['cinematic-images']=[cinematic_media]
         phases['build'] = [adapter._zb_fill_prompts, adapter._zb_voice_pass, adapter._zb_images_pass, adapter._zb_render_pass]
 
         def generate_missing(q, c):
             adapter._zb_images_pass(q, {**c, '_generate_missing': True})
         phases['generate-missing'] = [generate_missing]
+        if config.get('character_consistency') and action in ('write-story','images','build','references','cinematic-videos','cinematic-images','generate-missing'):
+            from ai_studio_animate_cast import reviewed
+            try:review=reviewed(config,adapter.zb_scenes,approved=False)
+            except ValueError:
+                if (project/'cast_analysis.json').exists():raise
+                review=None
+            if not review or not review.get('approved'):
+                phases[action]=phases['analyze-cast'] if not review else []
+                review_required=True
     else:
         from ai_studio_thumbnails import generate as generate_thumbnails
         from ai_studio_cast import analyze as analyze_cast, approve as approve_cast, import_ready, current as current_cast

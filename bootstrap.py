@@ -3,7 +3,7 @@ import hashlib,os,subprocess,sys
 from pathlib import Path
 ROOT=Path(__file__).resolve().parent
 key=hashlib.sha256(str(ROOT).casefold().encode()).hexdigest()[:12]
-ENV=Path(os.environ.get('LOCALAPPDATA',Path.home()/'AppData/Local'))/'FlowAiStudio'/'environments'/key
+ENV=Path.home()/'.flow_ai_studio'/'environments'/key
 PYTHON=ENV/'Scripts/python.exe'
 def main():
     action=sys.argv[1] if len(sys.argv)>1 else 'launch'

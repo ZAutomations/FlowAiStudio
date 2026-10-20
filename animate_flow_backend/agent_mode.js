@@ -995,6 +995,7 @@ async function uploadRefThroughPicker(page, box, file) {
         banner('REFERENCE IMAGES');
         log(`${REFS.length} reference image(s) declared.`);
         let ready = 0, missing = 0;
+        const rememberRef = r => {referenceCache.record(referenceState,REFERENCE_SCOPE,[r]);fs.mkdirSync(path.dirname(REFERENCE_CACHE_FILE),{recursive:true});fs.writeFileSync(REFERENCE_CACHE_FILE,JSON.stringify(referenceState,null,2));};
         for (const r of REFS) {
             if (!r.file) {
                 missing++;
@@ -1007,19 +1008,24 @@ async function uploadRefThroughPicker(page, box, file) {
                 log('      verified reference reused; skipping the preliminary picker search');ready++;continue;
             }
             if(await page.evaluate(referenceCache.namedImagePresent,r.name)){
-                log('      named Image already in project; attach once after prompt paste');ready++;continue;
+                log('      named Image already in project; attach once after prompt paste');rememberRef(r);ready++;continue;
             }
 
             // Skip the upload when a raw Image tile is already in the project.
-            const already = await refImageAlreadyPresent(page, box, r.name);
+            let already = await refImageAlreadyPresent(page, box, r.name);
+            if(!already){log('      reference search not confirmed; checking again before any upload');await wait(1500);already=await refImageAlreadyPresent(page,box,r.name);}
             if (already) {
                 log(`      already an Image tile - not uploading again`);
-                ready++;
+                rememberRef(r);ready++;
                 continue;
             }
 
             const okUpload = await uploadRefThroughPicker(page, box, r.file);
-            if (okUpload) ready++; else missing++;
+            if (okUpload) {
+                const verified=await refImageAlreadyPresent(page,box,r.name);
+                if(!verified)throw Error(`Uploaded reference ${r.name} is not yet verifiable. Retry library check; no scene submitted.`);
+                rememberRef(r);ready++;
+            } else missing++;
         }
         log(`Uploaded/available: ${ready}   Missing: ${missing}`);
         if (flag('--upload-references-only', false) && missing) throw Error('Reference library upload incomplete. Retry to upload remaining references; no generation submitted.');

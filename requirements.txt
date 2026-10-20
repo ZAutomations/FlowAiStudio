@@ -16,3 +16,4 @@ playwright>=1.48.0
 
 faster-whisper==1.2.1
 huggingface-hub<1
+hf_xet==1.7.0

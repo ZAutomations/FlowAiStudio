@@ -2,6 +2,7 @@
 VIDEO_MODELS = ('Omni 1.1 Flash', 'Veo 3.1 - Fast', 'Veo 3.1 - Lite')
 
 def reference_mode(options):
+    if options.get('character_consistency'):return 'characters'
     mode=options.get('reference_mode','auto')
     if mode not in ('auto','characters','none'):
         raise ValueError('Choose Auto, Character references or No references')
@@ -67,3 +68,14 @@ def clip_seconds(options):
     except (TypeError,ValueError):number=0
     if isinstance(value,bool) or number not in (6,8):raise ValueError('Animate clip duration must be 6 or 8 seconds')
     return int(number)
+
+
+def video_settings(options):
+    model=options.get('animate_model',VIDEO_MODELS[0])
+    choices=('360p','720p') if model=='Omni 1.1 Flash' else ('720p','1080p')
+    resolution=options.get('animate_video_resolution') or choices[0]
+    aspect=options.get('animate_video_aspect') or options.get('aspect','16:9')
+    if model not in VIDEO_MODELS:raise ValueError('Choose a supported Animate video model')
+    if resolution not in choices:raise ValueError(f'{model} supports '+', '.join(choices)+'. Choose a matching video generation resolution.')
+    if aspect not in ('16:9','9:16','1:1'):raise ValueError('Choose a supported video aspect ratio')
+    return resolution,aspect

@@ -13,6 +13,25 @@ from ai_studio_continuous_voice import align, generate, groups, tokens
 
 
 class ContinuousVoiceTests(unittest.TestCase):
+    def test_next_voice_request_runs_during_current_alignment(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmp:
+            adapter=Mock();adapter.zb_scenes=[{'narration':'First sentence.'},{'narration':'Second sentence.'}];adapter._zb_cancel=threading.Event()
+            second_started=threading.Event();calls=[]
+            def synth(text,path,settings):
+                calls.append(text)
+                if text.startswith('Second'):second_started.set()
+                with wave.open(str(path),'wb') as stream:
+                    stream.setparams((1,2,48000,0,'NONE','not compressed'));stream.writeframes(b'\x01\x00'*48000)
+                return True,[]
+            def recognize(path,model,cancel):
+                first='0001' in str(path)
+                if first:self.assertTrue(second_started.wait(5),'Next synthesis must overlap first alignment')
+                words=['First','sentence'] if first else ['Second','sentence']
+                return [{'word':w,'offset':i*.4,'duration':.3} for i,w in enumerate(words)]
+            with patch('ai_studio_continuous_voice.groups',return_value=[[0],[1]]):
+                generate(adapter,queue.Queue(),{'project':tmp,'voice_engine':'piper','settings':{}},synth,recognize)
+            self.assertEqual(calls,['First sentence.','Second sentence.'])
     def test_word_alignment_not_equal_scene_lengths(self):
         scenes = [{'narration':'One two.'},{'narration':'Three four.'}]
         words = [{'word':w,'offset':s,'duration':.3} for w,s in [('one',.2),('two',.7),('three',3),('four',3.5)]]

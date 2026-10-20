@@ -26,21 +26,39 @@ class AnimateStudio(AIStudioWorkflowMixin, ZBotBaseTabMixin):
                     pass
         atomic_json(p / 'project.json', data)
 
+    def _zb_voice_pass(self,q,config):
+        from ai_studio_cinematic import enabled, prepare
+        if enabled(config):
+            from studio_voice import TTSGenerator
+            return prepare(self,q,config,TTSGenerator.generate_voiceover)
+        return super()._zb_voice_pass(q,config)
+
     def _zb_write_story(self, q, config):
+        from ai_studio_cinematic import enabled
+        if enabled(config):return self._zb_voice_pass(q,config)
         from ai_studio_story import write_story
         write_story(self, q, config)
 
     def _zb_fill_prompts(self, q, config):
+        from ai_studio_cinematic import enabled
+        if enabled(config):return self._zb_voice_pass(q,config)
         from ai_studio_pipeline import fingerprint
         if config.get('ready_animation_script_key') == fingerprint(config['script']) and all(s.get('visual_prompt') for s in self.zb_scenes):
             q.put(('log', 'info', 'Reusing imported Animate visual prompts; narration is unchanged.'))
             return
+        if config.get('planning_source')=='chatgpt_ready':raise ValueError('Ready JSON is missing visual prompts; correct/import them from ChatGPT. Automatic writing is disabled.')
         from ai_studio_story import is_narration_story
         if is_narration_story(config):
             return self._zb_write_story(q, config)
         return super()._zb_fill_prompts(q, config)
 
-    def _zb_images_pass(self, q, config, recover_only=False):
+    def _zb_images_pass(self,q,config,recover_only=False):
+        from ai_studio_cinematic import enabled
+        if config.get('character_consistency'):
+            from ai_studio_animate_cast import reviewed
+            reviewed(config,self.zb_scenes)
+        if enabled(config):self._zb_voice_pass(q,config)
+        if config.get('character_consistency'):reviewed(config,self.zb_scenes)
         from ai_studio_animate_options import partial_options
         if config.get('animation_mode','partial') == 'partial' and partial_options(config)[0] == 'seconds':
             q.put(('log','info','Measuring opening animation against actual narration. Generating/reusing voice first.'))
@@ -52,43 +70,38 @@ class AnimateStudio(AIStudioWorkflowMixin, ZBotBaseTabMixin):
                 if elapsed>=float(config.get('animate_seconds',80)):break
                 scene['animation_duration']=scene_duration(scene);elapsed+=scene['animation_duration']
             q.put(('log','info',f'Opening {config.get("animate_seconds",80)} seconds: {animation_count(config,len(self.zb_scenes),self.zb_scenes)} scenes need video clips; remaining scenes use images.'))
-        if recover_only:
-            raise RuntimeError('Animate resumes matched images and clips through Generate Agent Media.')
+        if recover_only:raise RuntimeError('Animate resumes matched images and clips through Generate Agent Media.')
         from ai_studio_animate_setup import ensure_project, ensure_references
-        log = lambda m: q.put(('log', 'info', m))
-        config['flow_url'] = ensure_project(config, self._zb_cancel, log)
-        q.put(('callback', lambda url=config['flow_url']: self.zb_flow_url_var.set(url)))
-
+        log=lambda m:q.put(('log','info',m))
+        config['flow_url']=ensure_project(config,self._zb_cancel,log)
+        q.put(('callback',lambda url=config['flow_url']:self.zb_flow_url_var.set(url)))
         def plan_designs(refs):
             import re
-            system = 'Plan distinct recurring character designs and a recurring location for this script. Return ONLY a JSON object mapping each supplied permanent asset name to a detailed design string. Keep supplied names exactly. Character designs must specify role, age, face, hair, fixed clothing and colors. Location must specify layout and grey scenery. Do not invent additional named assets. Honor the provided preset design and visual style.'
-            user = json.dumps({'assets': [{'name': r['name'], 'kind': r['kind']} for r in refs], 'script': config['script'], 'style': config['style'], 'design': config.get('reference_design', ''), 'continuity': config.get('continuity', '')})
+            system='Plan distinct recurring character designs and a recurring location for this script. Return ONLY a JSON object mapping each supplied permanent asset name to a detailed design string. Keep supplied names exactly. Character designs must specify role, age, face, hair, fixed clothing and colors. Location must specify layout and grey scenery. Do not invent additional named assets. Honor the provided preset design and visual style.'
+            user=json.dumps({'assets':[{'name':r['name'],'kind':r['kind']} for r in refs],'script':config['script'],'style':config['style'],'design':config.get('reference_design',''),'continuity':config.get('continuity','')})
             from ai_studio_story import is_narration_story
-            raw, error = self._zb_llm(system, user, max_tokens=2200, provider='gemini' if is_narration_story(config) else config['llm'])
-            if error:
-                raise RuntimeError('Character/location planning failed: ' + str(error))
-            try:
-                return json.loads(re.search('\\{.*\\}', raw, re.S).group())
-            except (AttributeError, ValueError):
-                raise RuntimeError('Character/location planner returned invalid JSON. Retry with the selected writing provider.')
-        config['references'] = ensure_references(config, self._zb_cancel, log, plan_designs)
+            raw,error=self._zb_llm(system,user,max_tokens=2200,provider='gemini' if is_narration_story(config) else config['llm'])
+            if error:raise RuntimeError('Character/location planning failed: '+str(error))
+            try:return json.loads(re.search(r'\{.*\}',raw,re.S).group())
+            except (AttributeError,ValueError):raise RuntimeError('Character/location planner returned invalid JSON. Retry with the selected writing provider.')
+        if config.get('character_consistency'):
+            from ai_studio_animate_cast import references as full_references
+            full_references(self,q,config)
+        else:config['references']=ensure_references(config,self._zb_cancel,log,plan_designs)
         self._zb_save_project(config)
-
         def media(record):
-            scene = self.zb_scenes[record['index']]
-            if record['kind'] == 'video':
-                scene.update(video_path=record['output'], video_key=record['key'], video_status='done')
-                thumbnail = Path(config['project']) / 'images' / f"scene_{record['index'] + 1:04d}.png"
-                thumbnail.parent.mkdir(exist_ok=True)
-                if not valid_image(thumbnail):
-                    run_ffmpeg(['-i', record['output'], '-frames:v', '1', thumbnail], self._zb_cancel)
-                scene['image_path'] = str(thumbnail)
-            else:
-                scene.update(image_path=record['output'], image_key=record['key'], image_status='done')
-            self._zb_save_project(config)
-            q.put(('refresh',))
-            q.put(('log', 'success', f"Scene {record['index'] + 1}: {record['kind']} saved."))
-        generate_agent_media(self.zb_scenes, config, self._zb_cancel, lambda m: q.put(('log', 'info', m)), media)
+            scene=self.zb_scenes[record['index']]
+            if record['kind']=='video':
+                scene.update(video_path=record['output'],video_key=record['key'],video_status='done')
+                thumbnail=Path(config['project'])/'images'/f"scene_{record['index']+1:04d}.png";thumbnail.parent.mkdir(exist_ok=True)
+                if not valid_image(thumbnail):run_ffmpeg(['-i',record['output'],'-frames:v','1',thumbnail],self._zb_cancel)
+                scene['image_path']=str(thumbnail)
+            else:scene.update(image_path=record['output'],image_key=record['key'],image_status='done')
+            self._zb_save_project(config);q.put(('refresh',));q.put(('log','success',f"Scene {record['index']+1}: {record['kind']} saved."))
+        if config.get('continuity_ledger_enabled') and config.get('cinematic_media_kind')!='image':
+            from ai_studio_continuity_ledger import build as build_ledger
+            build_ledger(self,q,config)
+        generate_agent_media(self.zb_scenes,config,self._zb_cancel,lambda m:q.put(('log','info',m)),media)
 
     def _zb_render_pass(self, q, config):
         self.zb_last_video = str(render_animated_video(self.zb_scenes, config['project'], config, self._zb_cancel, progress=lambda n: q.put(('progress', n)), log=lambda m: q.put(('log', 'info', m))))

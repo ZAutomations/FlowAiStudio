@@ -1,0 +1,46 @@
+Create FOUR separate complete JSON files: video_clips.json, image_scenes.json, thumbnail_prompts.json and video_metadata.json. No Gemini planning will follow.
+Read the full narration. Preserve every original word, punctuation and order. Never rewrite or summarize narration.
+I specify N opening eight-second video clips (e.g. 10 or 15); remaining narration becomes still-image scenes.
+Use consecutive exact narration passages for each row. Spoken duration is estimated here; the app later measures
+continuous audio and maps VIDEO directions to actual eight-second windows. IMAGE rows keep their own narration-based beat boundaries. Never claim estimates are measured.
+STILL-IMAGE TIMING IS DIFFERENT FROM VIDEO TIMING: eight seconds applies ONLY to video clips. Split the remaining narration into natural semantic image beats aiming for about 4 seconds each, usually 2-6 seconds depending on delivery and meaning. Estimate roughly 5-12 spoken words per image as a flexible guide, not a quota; prefer one complete short clause/idea. Break long sentences at meaningful clause boundaries; do not group several ideas to fill an eight-second image slot. Each image visual_prompt must depict precisely that row's narration in full-story context. Preserve every word in order; never shorten, pad or rewrite narration to force a duration. Do not split a word. Actual display duration is measured from generated narration, not fixed by this estimate. Still images require ONE image per narration beat, no shots array or video cuts.
+
+Use 2-3 distinct sequential shots per video, local start/end covering exactly 0-8. Prefer 0-3, 3-6, 6-8 seconds. Explicitly label HARD CUT at each boundary. A pan/zoom is not a cut. Each shot must state its narration beat, distinct framing/action, and continuity of cast, props and screen direction. Keep characters silent; local narrator speaks.
+Keep recurring faces, dress, props, location layout, screen direction, lighting and emotional state consistent.
+Each video has continuity {location,start_state,end_state,continues_previous}; a continuation's start_state must exactly
+equal the preceding end_state and location. New time/place must be explicitly established. Reference names must match
+the supplied filenames exactly, without extension. Do not invent cast for documentary scenes.
+Use the supplied visual preset and 16:9 unless requested otherwise. No dialogue, lip-sync, music, embedded text or collage.
+
+video_clips.json schema:
+{"version":1,"title":"TITLE","script":"COMPLETE ORIGINAL SCRIPT","video_clips":[
+{"narration":"EXACT FIRST PASSAGE","visual_prompt":"Concrete action and composition","references":["DSPMalik"],
+"continuity":{"location":"PoliceStation","start_state":"At doorway","end_state":"At desk","continues_previous":false},
+"shots":[{"start":0,"end":4,"visual_prompt":"First action"},{"start":4,"end":8,"visual_prompt":"Connected reaction"}]}]}
+
+image_scenes.json schema:
+{"version":1,"image_scenes":[{"narration":"EXACT NEXT PASSAGE","visual_prompt":"One concrete image matching story context",
+"references":["DSPMalik"]}]}
+
+Joining ALL video narration followed by ALL image narration must reproduce COMPLETE ORIGINAL SCRIPT unchanged.
+Return every scene; no omissions, ellipses or duplicated narration. Exactly N video rows unless full animation is requested.
+Keep images as ordinary narration-based images, not multi-shot videos. Each file is independently valid JSON.
+For full story character consistency, ALSO include an "assets" array at the top level of video_clips.json.
+Declare EVERY recurring character/location used in EITHER file, up to 40:
+"assets":[{"name":"DSPMalik","kind":"character","aliases":["DSP"],"description":"Fixed face, age, hair, clothing and colors"},
+{"name":"PoliceStation","kind":"location","aliases":[],"description":"Fixed architecture, entrances and layout"}]
+Every references entry in both files must name a declared asset. At most six references per scene.
+The app opens cast review and generates/reuses the complete approved library before attaching only needed identities.
+Input: title, full original narration, desired N video clips (or full animation), selected visual preset and reference descriptions.
+
+ADDITIONAL SEPARATE DELIVERABLE FILES (required, alongside the story JSON):
+Create thumbnail_prompts.json and video_metadata.json as independently valid JSON files. Never put posting metadata or thumbnail scenes into the narration/story arrays. Never append thumbnails to the scene plan. Keep story import schemas unchanged.
+If your environment supports file creation, attach each named file for download. Otherwise output one separate labelled JSON code block per filename; never combine files in one JSON or truncate any file.
+
+thumbnail_prompts.json schema:
+{"version":1,"video_title":"Selected best title","visual_preset":"Exact selected preset name","aspect_ratio":"Selected app ratio","thumbnails":[{"id":1,"concept":"Distinct topic-specific hook","headline":"2-5 short words in the narration language","references":["Exact relevant declared asset name"],"prompt":"Complete standalone image-generation prompt including full selected visual style, topic-specific subject/action/expression, composition, background, colors, lighting, exact headline placement and lettering, required reference identities and exclusions","negative_prompt":"Off-topic metaphors, clutter, long copy, wrong period, duplicate subjects, illegible text"}]}
+Exactly FOUR thumbnails, ids 1-4, with genuinely different compositions/hooks, not color variations. Read the FULL story first. Show its actual main person/object or central conflict; do not illustrate isolated keywords or invent plot twists, evidence, outcomes or unsupported factual claims. Use the selected visual preset including its complete style text in EACH prompt: handpainted presets remain handpainted; white/light-grey backgrounds stay white/light-grey when specified. For documentary/explainer topics, show the relevant subject/illustration and use people only when needed. Use VS layouts only for an actual comparison. Otherwise use a clear single focal subject, expressive pose/reaction when relevant, one meaningful clue/prop, strong contrast and uncluttered negative space. Aim for mobile readability, compelling curiosity and 2-5-word headlines; no paragraphs or excessive labels. Headlines are allowed ONLY in thumbnails; scene media remains text-free. Respect selected aspect ratio. Reuse only appropriate declared references; do not invent attachment identifiers.
+
+video_metadata.json schema:
+{"version":1,"language":"Narration language","best_title":"Strong truthful topic-specific posting title","alternative_titles":["Alternative 1","Alternative 2","Alternative 3"],"description":"Copy-ready description: compelling accurate opening, concise story/topic summary without invented claims, natural relevant search phrases, appropriate call to action, and relevant hashtags at the end","hashtags":["#RelevantHashtag"],"tags":["relevant search phrase"],"tags_csv":"Same tags joined with commas","thumbnail_recommendation":1}
+Choose ONE strongest title and three alternatives in the narration language. Write a clear curiosity-driven title grounded in the actual story; no fabricated shocking claims or promises of guaranteed virality. Provide 3-5 relevant hashtags and 10-20 distinct relevant tags with no unrelated trending terms or spam. Description must be ready to post, with no placeholders, invented timestamps, fake links or claims. Keep tags_csv within 500 characters. Any real-person/fiction disclosure must reflect supplied context; do not invent biographical facts. thumbnail_recommendation must select one of ids 1-4.

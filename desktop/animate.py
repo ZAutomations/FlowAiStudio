@@ -3,8 +3,8 @@ import copy
 from pathlib import Path
 from .storage import ROOT, read, atomic, public
 
-PRESET_KEYS = ('animation_mode','animate_count','partial_animation_unit','animate_seconds','animate_clip_seconds','animate_multishot','animate_model','auto_project','auto_reference','reference_mode',
-               'character_names','place_name','reference_design','reference_files',
+PRESET_KEYS = ('continuity_ledger_enabled','animate_narration_mode','narration_alignment_model','animation_mode','animate_count','partial_animation_unit','animate_seconds','animate_clip_seconds','animate_multishot','animate_model','animate_video_resolution','animate_video_aspect','animate_video_batch_size','auto_project','auto_reference','reference_mode',
+               'character_consistency','auto_cast','main_character_references','dsp_malik_reference_path','character_names','place_name','reference_design','reference_files',
                'style_name','custom_style','continuity','resolution','narration_style','narration_direction')
 
 def metadata(settings, root=ROOT):
@@ -23,7 +23,7 @@ def metadata(settings, root=ROOT):
     defaults.update({mapping.get(k,k):v for k,v in draft.get('controls',{}).items()})
     defaults.update(draft.get('animate',{}))
     private=settings.get('ai_studio_animate',{})
-    for key in ('animate_count','animate_model','agent_tool_dir','auto_project','auto_reference','character_names','place_name','reference_design','reference_files','reference_mode'):
+    for key in ('animate_count','animate_model','agent_tool_dir','auto_project','auto_reference','character_consistency','auto_cast','main_character_references','dsp_malik_reference_path','character_names','place_name','reference_design','reference_files','reference_mode'):
         if key not in draft.get('animate',{}) and key in private:defaults[key]=private[key]
     defaults.update(script=draft.get('script',''), project=draft.get('project') or '')
     presets = read(folder/'ai_studio_animate_presets.json')
@@ -32,8 +32,8 @@ def metadata(settings, root=ROOT):
     for name, value in presets.items():
         converted[name]={**value.get('animate',{}), **{oldmap[k]:v for k,v in value.get('studio',{}).items() if k in oldmap}}
     converted.update(read(root/'.desktop/animate_presets.json'))
-    from ai_studio_animate_prompts import master_prompt
-    return {**inherited,'master_prompts':{mode:master_prompt(mode) for mode in ('partial','full')},'defaults':defaults,'presets':converted,'scenes':draft.get('scenes',[])}
+    from ai_studio_animate_prompts import master_prompt,split_master_prompt
+    return {**inherited,'master_prompts':{**{mode:master_prompt(mode) for mode in ('partial','full')},'split':split_master_prompt()},'defaults':defaults,'presets':converted,'scenes':draft.get('scenes',[])}
 
 def save_preset(name, options, root=ROOT):
     name=str(name).strip()
@@ -51,14 +51,18 @@ def references(config):
     from ai_studio_pipeline import valid_image
     paths=[p.strip() for p in str(config.get('reference_files','')).split('|') if p.strip()]
     if not paths:paths=config.get('references',[])
-    if not isinstance(paths,list) or len(paths)>3 or any(not isinstance(p,str) or ',' in p or not valid_image(p) for p in paths):
-        raise ValueError('Choose up to three valid reference images with no commas in their paths')
+    if not isinstance(paths,list) or len(paths)>40 or any(not isinstance(p,str) or ',' in p or not valid_image(p) for p in paths):
+        raise ValueError('Choose up to forty valid reference images with no commas in their paths')
+    names=[Path(p).stem for p in paths]
+    import re
+    if len({n.casefold() for n in names})!=len(names) or any(not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,39}',n) for n in names):
+        raise ValueError('Reference filenames must have unique simple identifiers such as DSPMalik.png.')
     return paths
 
 def new_project(payload, settings, cancel, emit):
     from .worker import studio
     from ai_studio_pipeline import check_cancel
-    source=Path(payload['animate_source']).resolve() if payload.get('animate_source') else None
+    source=Path(payload['animate_source']).resolve() if payload.get('action')=='import' and payload.get('animate_source') else None
     saved=public(read(source/'project.json')) if source else {}
     if payload['action']=='import' and (not saved or saved.get('workflow')=='animate'):
         raise ValueError('Choose a saved AI Studio project to import')
@@ -87,6 +91,10 @@ def new_project(payload, settings, cancel, emit):
         options=saved.get('options',{})
         config.update({k:options[k] for k in ('style_name','custom_style','continuity','resolution') if k in options})
         config['custom_style']=config.get('custom_style','')
+    if payload['action']=='new':
+        config.update(script='',scene_seed=[],package_seed={},references=[],reference_files='',scene_reference_map=None)
+        for key in ('planning_source','cinematic_ready_prompts','ready_animation_script_key','cast_assets','reference_descriptions','thumbnail_paths','last_video','animation_ready','animation_video_ready','animation_image_ready'):
+            config.pop(key,None)
     config.pop('animate_source',None)
     return studio(config,settings,cancel,animated=True,emit=emit)
 

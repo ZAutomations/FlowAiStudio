@@ -4,10 +4,18 @@ import os
 import time
 from pathlib import Path
 from ai_studio_animate_options import animation_count
-from ai_studio_pipeline import TRANSITIONS, build_timeline, check_cancel, run_ffmpeg, _concat_file, valid_audio, write_subtitles, probe, atomic_json
+from ai_studio_pipeline import (TRANSITIONS, build_timeline, check_cancel, run_ffmpeg,
+    _concat_file, valid_audio, write_subtitles, probe, atomic_json)
 
 def render_animated_video(scenes, project, options, cancel=None, progress=None, log=None):
-    """Standalone scene assembly on one continuous narration clock with clean cuts."""
+    """Keep voice/captions on a continuous clock; transitions overlap images only."""
+    from ai_studio_cinematic import enabled as cinematic_enabled
+    if cinematic_enabled(options):
+        if any('cinematic_start' not in s or not valid_audio(s.get('audio_path','')) for s in scenes):
+            raise ValueError('Plan cinematic narration and clips before rendering. Existing scenes are retained.')
+        # Cinematic timing stays on the narration clock. The shared renderer
+        # overlaps visual tails only and applies enabled transition/caption settings.
+        # Do not override the user's render controls here.
     if options.get('camera_transitions_enabled'):
         from ai_studio_camera_transitions import settings as validate_camera_transitions
         validate_camera_transitions(options)
@@ -19,7 +27,7 @@ def render_animated_video(scenes, project, options, cancel=None, progress=None, 
     if width <= 0 or height <= 0 or width % 2 or height % 2:
         raise ValueError('Resolution must use positive even dimensions.')
     fps = 25
-    transition = 'Cut'
+    transition = 'Cut' if options.get('camera_transitions_enabled') or options.get('use_transitions_tab') else options.get('transition', 'Dissolve')
     if transition not in TRANSITIONS:
         raise ValueError('Unknown transition: ' + transition)
     timeline = build_timeline(scenes, transition, options.get('transition_seconds', 0.4), fps)
@@ -35,14 +43,20 @@ def render_animated_video(scenes, project, options, cancel=None, progress=None, 
         check_cancel(cancel)
         i = shot['index']
         length = shot['duration'] + shot['tail']
-        frames = max(2, math.ceil(shot['end'] * fps - 1e-07) - math.ceil(shot['start'] * fps - 1e-07))
+        # Cuts share a cumulative frame grid. Rounding each scene separately
+        # accumulates drift and can leave the image track shorter than speech.
+        frames = max(2, math.ceil(shot['end'] * fps - 1e-7) - math.ceil(shot['start'] * fps - 1e-7)) if transition == 'Cut' else max(2, math.ceil(length * fps - 1e-7))
         clip = render_dir / f'shot_{i:04d}.mp4'
         voice = render_dir / f'voice_{i:04d}.wav'
         if i < animated:
             from ai_studio_animate_media import valid_video
             video = scene.get('video_path', '')
             if not valid_video(video):
-                raise RuntimeError(f'Scene {i + 1} needs its matched animated clip before rendering.')
+                raise RuntimeError(f'Scene {i+1} needs its matched animated clip before rendering.')
+            if cinematic_enabled(options) and probe(video)[0] < min(8,shot['duration'])-.12:
+                raise RuntimeError(f'Cinematic clip {i+1} is shorter than its narration window. Regenerate this clip; a frozen frame will not hide missing action.')
+            # Trim longer clips and hold the final frame of shorter clips.
+            # The narration clock is authoritative; generated clip audio is discarded.
             vf = f'scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},setsar=1,fps={fps},tpad=stop_mode=clone:stop_duration={length:.6f}'
             from ai_studio_animate_options import active_video_seconds
             active = active_video_seconds(options, shot)
@@ -54,11 +68,12 @@ def render_animated_video(scenes, project, options, cancel=None, progress=None, 
             vf = f'scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},setsar=1,fps={fps}'
             input_args = ['-loop', '1', '-i', scene['image_path']]
         run_ffmpeg(input_args + ['-vf', vf, '-frames:v', str(frames), '-an', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-threads', '2', clip], cancel)
-        run_ffmpeg(['-i', scene['audio_path'], '-af', f"apad,atrim=duration={shot['duration']:.6f},asetpts=PTS-STARTPTS", '-ar', '48000', '-ac', '2', '-c:a', 'pcm_s16le', voice], cancel)
+        run_ffmpeg(['-i', scene['audio_path'], '-af', f'apad,atrim=duration={shot["duration"]:.6f},asetpts=PTS-STARTPTS', '-ar', '48000', '-ac', '2', '-c:a', 'pcm_s16le', voice], cancel)
         voice_files.append(voice)
         segments.append({'path': clip, 'duration': shot['duration'], 'tail': shot['tail']})
         progress(int((i + 1) / len(scenes) * 60))
-        log(f"Scene {i + 1}/{len(scenes)} rendered ({shot['duration']:.2f}s voice).")
+        log(f'Scene {i + 1}/{len(scenes)} rendered ({shot["duration"]:.2f}s voice).')
+    # Join in bounded groups; hundreds of full-size images never enter one graph.
     level = 0
     while len(segments) > 1:
         joined = []
@@ -68,10 +83,28 @@ def render_animated_video(scenes, project, options, cancel=None, progress=None, 
                 joined.append(group[0])
                 continue
             out = render_dir / f'join_{level}_{group_index:04d}.mp4'
-            listing = render_dir / f'join_{level}_{group_index:04d}.txt'
-            _concat_file([s['path'] for s in group], listing)
-            run_ffmpeg(['-f', 'concat', '-safe', '0', '-i', listing.name, '-an', '-c:v', 'copy', out], cancel, cwd=render_dir)
-            joined.append({'path': out, 'duration': sum((s['duration'] for s in group)), 'tail': group[-1]['tail']})
+            if transition == 'Cut' or not any(s['tail'] for s in group[:-1]):
+                listing = render_dir / f'join_{level}_{group_index:04d}.txt'
+                _concat_file([s['path'] for s in group], listing)
+                run_ffmpeg(['-f', 'concat', '-safe', '0', '-i', listing.name, '-an', '-c:v', 'copy', out], cancel, cwd=render_dir)
+            else:
+                args = []
+                graph = []
+                for j, segment in enumerate(group):
+                    args += ['-i', segment['path']]
+                    graph.append(f'[{j}:v]fps={fps},settb=AVTB,setpts=PTS-STARTPTS,format=yuv420p[v{j}]')
+                label = 'v0'
+                offset = 0.0
+                for j in range(1, len(group)):
+                    offset += group[j - 1]['duration']
+                    tail = group[j - 1]['tail']
+                    if tail <= 0:
+                        graph.append(f'[{label}][v{j}]concat=n=2:v=1:a=0[x{j}]')
+                    else:
+                        graph.append(f'[{label}][v{j}]xfade=transition={TRANSITIONS[transition]}:duration={tail:.6f}:offset={offset:.6f}[x{j}]')
+                    label = f'x{j}'
+                run_ffmpeg(args + ['-filter_complex_threads', '1', '-filter_complex', ';'.join(graph), '-map', f'[{label}]', '-an', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-threads', '2', out], cancel)
+            joined.append({'path': out, 'duration': sum(s['duration'] for s in group), 'tail': group[-1]['tail']})
         segments = joined
         level += 1
     listing = render_dir / 'voice_concat.txt'
@@ -81,16 +114,20 @@ def render_animated_video(scenes, project, options, cancel=None, progress=None, 
     visual_source = segments[0]['path']
     sfx = None
     settings = dict(options.get('settings', {}))
-    from ai_studio_tab_render import captions_enabled
-    use_transitions = False
-    use_effects = False
+    from ai_studio_tab_render import TRANSITION_KEYS, captions_enabled, has_frame_effects
+    use_transitions = bool(options.get('use_transitions_tab')) and not options.get('camera_transitions_enabled')
+    use_effects = bool(options.get('use_effects_tab'))
+    if (use_transitions and any(settings.get(k) for k in TRANSITION_KEYS)) or (use_effects and has_frame_effects(settings)):
+        from ai_studio_tab_render import render_tab_visuals
+        visual_source, sfx = render_tab_visuals(visual_source, render_dir / 'tab_visuals.mp4', timeline,
+                                              settings, use_transitions, use_effects, cancel, progress, log)
     from ai_studio_camera_transitions import apply as apply_camera_transitions
     visual_source, sfx = apply_camera_transitions(visual_source, timeline, options, cancel, log, sfx)
     progress(80)
     settings['_zb_use_text_effects'] = use_effects
     cues = write_subtitles(project, scenes, timeline, width, height, settings)
     narration_duration = total_duration
-    thumbnail_duration = max(0.1, min(30, float(settings.get('thumbnail_frame_duration', 3)))) if use_effects and settings.get('add_thumbnail_frame') else 0
+    thumbnail_duration = max(.1, min(30, float(settings.get('thumbnail_frame_duration',3)))) if use_effects and settings.get('add_thumbnail_frame') else 0
     total_duration += thumbnail_duration
     args = ['-i', visual_source, '-i', narration]
     bgm = options.get('bgm_file')
@@ -121,7 +158,7 @@ def render_animated_video(scenes, project, options, cancel=None, progress=None, 
     log('Final export: burning captions and mixing audio…' if want_captions else 'Final export: attaching audio without re-encoding images…')
     final_started = time.perf_counter()
     run_ffmpeg(args, cancel, cwd=project)
-    log(f'Final export finished in {time.perf_counter() - final_started:.1f}s.')
+    log(f'Final export finished in {time.perf_counter()-final_started:.1f}s.')
     duration, streams = probe(temporary)
     if not {'audio', 'video'}.issubset({s.get('codec_type') for s in streams}):
         raise RuntimeError('Rendered file is missing video or narration.')
@@ -129,6 +166,10 @@ def render_animated_video(scenes, project, options, cancel=None, progress=None, 
         raise RuntimeError(f'Render duration mismatch: voice {total_duration:.3f}s, video {duration:.3f}s')
     os.replace(temporary, final)
     from ai_studio_tab_render import tab_settings_snapshot
-    atomic_json(project / 'timeline.json', {'duration': total_duration, 'narration_duration': narration_duration, 'thumbnail_duration': thumbnail_duration, 'scenes': timeline, 'captions': cues, 'captions_burned': bool(want_captions), 'transition': transition, 'resolution': [width, height], 'use_transitions_tab': use_transitions, 'use_effects_tab': use_effects, 'render_tab_settings': tab_settings_snapshot(settings), 'animation_mode': options.get('animation_mode', 'partial'), 'animated_scenes': animated, 'animate_model': options.get('animate_model', 'Omni 1.1 Flash')})
+    atomic_json(project / 'timeline.json', {'duration': total_duration, 'narration_duration': narration_duration, 'thumbnail_duration': thumbnail_duration, 'scenes': timeline, 'captions': cues, 'captions_burned': bool(want_captions), 'transition': transition, 'resolution': [width, height],
+                'use_transitions_tab': use_transitions, 'use_effects_tab': use_effects,
+                'render_tab_settings': tab_settings_snapshot(settings),
+                'animation_mode': options.get('animation_mode','partial'),
+                'animated_scenes': animated, 'animate_model': options.get('animate_model','Omni 1.1 Flash')})
     progress(100)
     return final

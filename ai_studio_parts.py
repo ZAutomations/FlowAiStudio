@@ -20,12 +20,19 @@ def scene_range(config,count):
     return start-1,end
 
 
-def compile_part(adapter,q,config):
+def compile_part(adapter,q,config,animated=False):
     start,end=scene_range(config,len(adapter.zb_scenes))
     if start>=end:raise ValueError('Parse scenes first.')
     selected=adapter.zb_scenes[start:end]
-    missing=[str(start+i+1) for i,scene in enumerate(selected) if not valid_image(scene.get('image_path',''))]
-    if missing:raise ValueError('Cannot compile this part. Missing scene images: '+', '.join(missing)+'. No scenes were skipped and no images generated.')
+    animated_count=0
+    if animated:
+        from ai_studio_animate_options import animation_count
+        from ai_studio_animate_media import valid_video
+        animated_count=animation_count(config,len(adapter.zb_scenes),adapter.zb_scenes)
+    missing=[str(start+i+1) for i,scene in enumerate(selected)
+             if not (valid_video(scene.get('video_path','')) if animated and start+i<animated_count
+                     else valid_image(scene.get('image_path','')))]
+    if missing:raise ValueError(('Cannot compile this part. Missing scene media: ' if animated else 'Cannot compile this part. Missing scene images: ')+', '.join(missing)+'. No scenes were skipped and no images generated.')
     root=Path(config['project']);folder=root/'parts'/f'part_{start+1:04d}-{end:04d}'
     identity=fingerprint('part-v1',[(start+i,scene['narration'],scene.get('visual_prompt','')) for i,scene in enumerate(selected)])
     checkpoint=folder/'part_source.json'
@@ -39,8 +46,13 @@ def compile_part(adapter,q,config):
     for i,scene in enumerate(selected,start+1):
         check_cancel(adapter._zb_cancel)
         target=folder/'images'/f'scene_{i:04d}.png'
-        if not target.exists() or target.read_bytes()!=Path(scene['image_path']).read_bytes():shutil.copy2(scene['image_path'],target)
+        if valid_image(scene.get('image_path','')) and (not target.exists() or target.read_bytes()!=Path(scene['image_path']).read_bytes()):shutil.copy2(scene['image_path'],target)
         row=copy.deepcopy(scene);row.update(source_scene_number=i,image_path=str(target))
+        if animated and scene.get('video_path'):
+            video=Path(scene['video_path']);out=folder/'clips'/f'source_{i:04d}{video.suffix}'
+            if video.is_file():
+                if not out.exists() or out.stat().st_size!=video.stat().st_size:shutil.copy2(video,out)
+                row['video_path']=str(out)
         local=next((r for r in previous.get('scenes',[]) if r.get('source_scene_number')==i and r['narration']==row['narration']),None)
         if local:
             for key in ('audio_path','audio_key','audio_status','voice_engine','word_timings','timing_source'):
@@ -53,12 +65,25 @@ def compile_part(adapter,q,config):
     child={**config,'project':str(folder),'title':f'{config["title"]} — scenes {start+1}–{end}',
         'script':'\n\n'.join(s['narration'] for s in scenes),'thumbnail_enabled':False,'thumbnail_paths':[],
         'scene_start':1,'scene_end':'','part_source_project':str(root),'part_scene_start':start+1,'part_scene_end':end}
+    if animated:
+        from ai_studio_animate_options import partial_options
+        child.update(animation_mode='partial',partial_animation_unit='scenes',animate_count=max(0,min(end,animated_count)-start))
+        if config.get('animation_mode','partial')=='partial' and partial_options(config)[0]=='seconds':
+            from ai_studio_animate_options import scene_duration
+            child.update(partial_animation_unit='seconds',animate_seconds=max(0,float(config.get('animate_seconds',80))-sum(scene_duration(s) for s in adapter.zb_scenes[:start])))
+        child['output']=''
     parent_scenes,parent_video=adapter.zb_scenes,adapter.zb_last_video
     try:
         adapter.zb_scenes=scenes;adapter.zb_last_video=None
         adapter._zb_save_project(child)
         q.put(('log','info',f'Compiling scenes {start+1}–{end} only. Copied images into {folder}; generating narration, then rendering.'))
-        adapter._zb_voice_pass(q,child)
+        if animated and config.get('animate_narration_mode')=='cinematic':
+            from ai_studio_pipeline import valid_audio
+            if any(not valid_audio(s.get('audio_path','')) for s in scenes):
+                raise ValueError('Prepare continuous narration and cinematic plan before compiling a part. Saved media retained.')
+            q.put(('log','info','Reusing measured continuous narration; no replanning or new Gemini analysis.'))
+        else:
+            adapter._zb_voice_pass(q,child)
         adapter._zb_render_pass(q,child)
         result={'start':start+1,'end':end,'project':str(folder/'project.json'),'video':adapter.zb_last_video}
         config['_part_result']=result

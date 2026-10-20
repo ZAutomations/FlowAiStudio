@@ -74,10 +74,14 @@ def media_plan(scenes, config):
         elif kind=='video' and config.get('animate_multishot'):prompt=video_direction(prompt,'Silent on-screen characters; local narration is added separately.',clip_seconds(config),True)
         if kind=='video' and config.get('animate_multishot') and scene.get('shots'):
             prompt+='\nTIMED SHOTS INSIDE THIS SINGLE CLIP (not separate outputs): '+json.dumps(scene['shots'],ensure_ascii=False)
+        if scene.get('cinematic_continuity'):
+            prompt+='\nLOCKED FILM CONTINUITY: '+json.dumps(scene['cinematic_continuity'],ensure_ascii=False)
         key=fingerprint('animate-v2',i,kind,clip_seconds(config) if kind=='video' else 0,prompt,config.get('animate_model') if kind=='video' else 'Nano Banana',selected_references)
         if used is not None:key=fingerprint('scene-cast-v1',key,used)
         token='AS_SCENE_'+key[:20]
         records.append({'index':i,'kind':kind,'key':key,'token':token,'prompt':prompt,
+                        'continuity_source_key':__import__('ai_studio_continuity_ledger').scene_key(scene),
+                        'shots':scene.get('shots',[]),
                         **({'reference_names':used} if used is not None else {}),
                         'output':str(Path(config['project'])/('videos' if kind=='video' else 'images')/f'scene_{i+1:04d}.{"mp4" if kind=="video" else "png"}')})
     return records
@@ -93,14 +97,21 @@ def batch_prompt(records,config):
            ('Permanent reference names: '+', '.join(Path(p).stem for p in config.get('references',[]))+'. Character/location bible: '+json.dumps(config.get('reference_descriptions',{}),ensure_ascii=False)+'. Keep story roles mapped to these same named assets.' if config.get('references') else 'Choose subjects, objects, environments and explanatory visual actions from the scene prompts. Do not introduce CharacterA, CharacterB or StoryPlace.'),
            ('All listed scene outputs must be VIDEO clips. Use '+config['animate_model']+'.' if all(r['kind']=='video' for r in records)
             else 'For images use Nano Banana. For videos use '+config['animate_model']+'.'),
-           'Videos: silent characters, no dialogue, narration, music or captions. Add subtle natural character action and camera movement. Duration exactly '+str(clip_seconds(config))+' seconds. '+('Each VIDEO output is one clip containing 2–4 sequential connected shots timed to its narration. Do not create a separate media output per shot, or a simultaneous collage/storyboard.' if config.get('animate_multishot') else 'Use one continuous shot per clip.'),
+           'Videos: silent characters, no dialogue, narration, music or captions. Add subtle natural character action and camera movement. Duration exactly '+str(clip_seconds(config))+' seconds. '+'Each VIDEO output is one edited clip containing 2–3 distinct shots with visible hard cuts timed to its narration. Follow its edit decision list below. Do not create separate outputs per shot or a simultaneous collage/storyboard.',
            'IMPORTANT: Begin each individual media generation prompt with its exact AS_SCENE tracking reference, verbatim as plain prompt text. Keep it in the saved generation prompt, not only in your chat reply or tool metadata. It is a tracking label; do not display or speak it in the media. Never omit, shorten or replace the tracking reference.',
            'Generate only this batch. Do not regenerate earlier scenes.']
+    if any(r['kind']=='video' for r in records):
+        from ai_studio_animate_options import video_settings
+        quality,ratio=video_settings(config)
+        lines.append(f'VIDEO SETTINGS - mandatory for every video output: use ONLY {config["animate_model"]}, resolution {quality}, aspect ratio {ratio}. Apply these settings in the video generation tool. Do not substitute another video model or resolution. If unavailable, report it instead of silently switching. These settings override other video resolution/ratio defaults; image settings remain unchanged.')
     if config.get('image_agent'):
         from ai_studio_image_models import batch_instructions
-        lines[1]='Use the attached named reference image pixels whenever their corresponding character or location occurs. Preserve identity and visual style across every batch.'
-        lines[4]='ALL outputs must be still IMAGES using '+preferred(config)+'. Never create video clips, animation, music or audio.\n'+batch_instructions(config)
-        lines[5]='Preserve reference identity only where that character or place occurs in the scene. Never force every attached character into every image. Preserve faces, age, hair, clothing, architecture and period details; do not substitute a similar-looking person.'
+        lines[1]='Exactly ONE image per requested identity/scene: x1, number_of_images=1. Never generate alternate variations. Use the attached named reference image pixels whenever their corresponding character or location occurs. Preserve identity and visual style across every batch.'
+        lines[2]='Attach only the references assigned to each scene. Never force the entire batch cast into one image.'
+        lines[5]='ALL outputs must be still IMAGES using '+preferred(config)+'. Never create video clips, animation, music or audio.\n'+batch_instructions(config)
+        lines[6]='Preserve reference identity only where that character or place occurs in the scene. Never force every attached character into every image. Preserve faces, age, hair, clothing, architecture and period details; do not substitute a similar-looking person.'
+    if config.get('cinematic_previous_frame'):
+        lines.append('CONTINUATION FRAME @'+config['cinematic_previous_frame']+': this is the actual final frame of the previous clip. Start from its pose, camera geography, lighting, clothing and props, then progress the narrated action. Do not hold this image for the entire clip. Character references define identity; this frame defines the starting composition.')
     lines.append('Full video context, for interpreting the visuals only; DO NOT speak it: '+json.dumps(
         {'title':config.get('title',''),'script':config.get('script','')},ensure_ascii=False))
     lines.append(TOPIC_DIRECTION+' '+MEANING_DIRECTION)
@@ -111,15 +122,32 @@ def batch_prompt(records,config):
         lines += [f"OUTPUT {r['index']+1:04d} — {r['kind'].upper()} — {r['token']}",
                   'Meaning of this scene (local narration; do not speak): '+scene_narration,r['prompt'],
                   'Generation prompt tracking reference: '+r['token']]
+        if r['kind']=='video':
+            from ai_studio_multishot import shot_instructions
+            lines.append(shot_instructions(r,clip_seconds(config)))
         if 'reference_names' in r:
             lines.append('References for THIS scene only: '+(', '.join(r['reference_names']) or 'NONE; do not introduce recurring characters or places.'))
             lines.append('Do not show other recurring characters or locations from the full story in this scene. Background extras only when required by this scene action.')
+    from ai_studio_continuity_ledger import prompt_context
+    lines.append(prompt_context(records,config))
     return '\n\n'.join(lines)
 
 
 def reference_groups(records,size):
     """Honor the requested scene count; prompts map the shared attachments per scene."""
     return [(records[start]['index'],records[start:start+size]) for start in range(0,len(records),size)]
+
+
+def cast_groups(records,size=6,video_size=1):
+    groups=[];batch=[];names=set()
+    for record in records:
+        used=set(record.get('reference_names',[]))
+        if len(used)>40:raise ValueError('A grouped clip exceeds the forty-identity reference library.')
+        if batch and (record['kind']!=batch[0]['kind'] or len(batch)>=(video_size if record['kind']=='video' else size)):
+            groups.append((batch[0]['index'],batch));batch=[];names=set()
+        batch.append(record);names.update(used)
+    if batch:groups.append((batch[0]['index'],batch))
+    return groups
 
 
 class AgentMedia(ZBotImageGenerator):
@@ -261,27 +289,10 @@ class AgentMedia(ZBotImageGenerator):
             page.keyboard.press('Escape')
             return ''
 
-    def _download_video(self,page,src,path):
-        client=page.context.new_cdp_session(page);handle=None
-        target=Path(path);target.parent.mkdir(parents=True,exist_ok=True);temporary=target.with_name(target.stem+'.downloading.mp4')
-        try:
-            frame=client.send('Page.getFrameTree')['frameTree']['frame']['id']
-            resource=client.send('Network.loadNetworkResource',{'frameId':frame,'url':src,'options':{'disableCache':False,'includeCredentials':True}})['resource']
-            handle=resource.get('stream')
-            if not resource.get('success') or not handle:raise RuntimeError('Browser could not download the matched video asset.')
-            with temporary.open('wb') as output:
-                while True:
-                    check_cancel(self.cancel)
-                    chunk=client.send('IO.read',{'handle':handle,'size':1048576})
-                    output.write(base64.b64decode(chunk['data']) if chunk.get('base64Encoded') else chunk['data'].encode())
-                    if chunk.get('eof'):break
-            if not valid_video(temporary):raise RuntimeError('The downloaded asset is not a playable video.')
-            os.replace(temporary,target)
-        finally:
-            if handle:
-                try:client.send('IO.close',{'handle':handle})
-                except Exception:pass
-            client.detach()
+    def _download_video(self,page,src,path,asset_id=None):
+        from ai_studio_upscaled_download import download
+        if not asset_id:raise RuntimeError('Upscaled download requires the exact matched video tile identity.')
+        return download(page,asset_id,path,self.cancel,self._log)
 
     def _load_video_source(self,page,asset):
         """Mount existing playback; never click a generation retry."""
@@ -372,10 +383,10 @@ class AgentMedia(ZBotImageGenerator):
                         r['asset_selection']='saved identity, otherwise stable asset ID order'
                         self._log(f"Scene {r['index']+1}: multiple outputs share its exact tracking label. Saving one image; alternate asset identities retained in the checkpoint.")
                     r['asset_id']=a['asset_id'];r['status']='matched';save()
-                    if not a['src']:
-                        a['src']=self._load_video_source(page,a) if r['kind']=='video' else ''
-                        if not a['src']:continue # never use its image poster as video
-                    if r['kind']=='video':self._download_video(page,a['src'],r['output'])
+                    if not a['src'] and r['kind']!='video':continue # video downloads use the exact tile menu, not playback URLs
+                    if r['kind']=='video':
+                        receipt=self._download_video(page,a['src'],r['output'],asset_id=a['asset_id'])
+                        if isinstance(receipt,dict):r.update(receipt)
                     elif not self._download_image(page,a['src'],r['output']):raise RuntimeError('Matched image download failed; saved identity retained.')
                     r['status']='complete';save();on_media(r)
                     deadline=time.monotonic()+timeout # real progress extends the idle budget
@@ -515,14 +526,20 @@ def _prepare_agent_prompt_once(config,prompt_file,references,cancel,log):
     if not driver.is_file():raise RuntimeError('Choose the Veo3_New Agent tool folder in Animate settings.')
     node=shutil.which('node') or str(Path(__file__).parent/'.venv/Lib/site-packages/playwright/driver/node.exe')
     from desktop.browser_accounts import browser_options
-    port=browser_options({**config,'provider':'flow'}).get('cdp_port',10312 if config.get('share_google_profile',True) else 10314)
+    port=config.get('_agent_cdp_port') or browser_options({**config,'provider':'flow','share_google_profile':config.get('share_google_profile',True)}).get('cdp_port',9232 if config.get('share_google_profile',True) else 9234)
     args=[node,str(driver),'--cdp',str(port),'--project-url',config['flow_url'],'--file',str(prompt_file),
           '--no-submit','--paste','--aspect',config['aspect']]
     if config.get('_upload_references_only'):args+=['--upload-references-only']
+    else:args+=['--no-upload-refs'] # library upload is a separate verified step; batches only attach
     if config.get('image_agent'):args+=['--image-only','--image-model',preferred(config)]
-    else:args+=['--scene-seconds',str(clip_seconds(config)),'--video-model',config['animate_model']]
+    else:
+        from ai_studio_animate_options import video_settings
+        quality,ratio=video_settings(config)
+        log(f'Video request settings: {config["animate_model"]}; {quality} (Agent instruction); ratio {ratio}.')
+        args[args.index('--aspect')+1]=ratio
+        args+=['--scene-seconds',str(clip_seconds(config)),'--video-model',config['animate_model'],'--video-resolution',quality]
     if references:
-        if config.get('image_agent'):args+=['--reference-files-json',json.dumps(references)]
+        if config.get('image_agent') or config.get('character_consistency') or config.get('animate_narration_mode')=='cinematic':args+=['--reference-files-json',json.dumps(references)]
         else:args+=['--refs',','.join(references)]
         args+=['--mention',','.join(Path(p).stem for p in references)]
     process=subprocess.Popen(args,cwd=tool,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,encoding='utf-8',errors='replace',creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
@@ -546,12 +563,15 @@ def _prepare_agent_prompt_once(config,prompt_file,references,cancel,log):
         process.stdout.close()
 
 
-def generate_agent_media(scenes,config,cancel,log,on_media):
-    plan=media_plan(scenes,config)
+def generate_agent_media(scenes,config,cancel,log,on_media,reference_records=None):
+    plan=reference_records if reference_records is not None else media_plan(scenes,config)
     file=Path(config['project'])/config.get('_manifest_name',('studio_agent_images.json' if config.get('image_agent') else 'animate_media.json'))
     identity=fingerprint([(r['key'],r['index']) for r in plan],config['flow_url'])
     if file.is_file():
         state=json.loads(file.read_text(encoding='utf-8'))
+        from ai_studio_animate_cast import adopt_existing_media
+        plan,state=adopt_existing_media(plan,state,scenes,config)
+        identity=fingerprint([(r['key'],r['index']) for r in plan],config['flow_url'])
         if config.get('image_agent') and state.get('identity')!=identity:
             old=state.get('records',[])
             same_story=(len(old)==len(plan) and state.get('identity')==fingerprint([(r['key'],r['index']) for r in old],config['flow_url'])
@@ -583,6 +603,21 @@ def generate_agent_media(scenes,config,cancel,log,on_media):
                 state={**state,'identity':identity,'records':reconciled}
                 atomic_json(file,state)
                 log(f'Reference correction adopted for {changed_count} scene plans. Completed images kept; issued tracking labels and submitted requests retained. Future requests use current reference files. Previous checkpoint archived.')
+        if state.get('identity')!=identity and config.get('cinematic_media_kind')=='image':
+            # Image-only continuation may follow a video-model selection change.
+            # Prove the complete previous plan, including Flow binding, before
+            # retaining old video identities; never loosen image/ref validation.
+            from ai_studio_animate_options import VIDEO_MODELS
+            old=state.get('records',[])
+            for model in VIDEO_MODELS:
+                original=media_plan(scenes,{**config,'animate_model':model})
+                if (len(old)==len(plan) and [r.get('key') for r in old]==[r['key'] for r in original]
+                    and state.get('identity')==fingerprint([(r['key'],r['index']) for r in original],config['flow_url'])
+                    and all(a['kind']==b['kind'] and (b['kind']=='video' or a['key']==b['key']) for a,b in zip(old,plan))):
+                    plan=[{**b,'key':a['key'],'token':a['token']} if b['kind']=='video' else b for a,b in zip(old,plan)]
+                    identity=fingerprint([(r['key'],r['index']) for r in plan],config['flow_url'])
+                    log('Image-only continuation: previous video-model identities preserved; unchanged image plan verified. No clips regenerated.')
+                    break
         from ai_studio_story import can_replan_pending
         if state.get('identity')!=identity and can_replan_pending(config,scenes):
             atomic_json(file.parent/'animate_plan_history'/f'{state["identity"]}.json',state)
@@ -616,7 +651,9 @@ def generate_agent_media(scenes,config,cancel,log,on_media):
         if len(records)!=len(plan) or [r.get('key') for r in records]!=[r['key'] for r in plan]:raise RuntimeError('Animate media manifest is inconsistent. Restore it before continuing.')
         for old,new in zip(records,plan):old['output']=new['output']
     else:state={'version':1,'identity':identity,'records':[dict(r,status='pending') for r in plan]};records=state['records']
-    for record in records:record['narration']=scenes[record['index']]['narration']
+    for record in records:
+        record['narration']=scenes[record['index']]['narration']
+        if 'continuity_source_key' in plan[record['index']]:record['continuity_source_key']=plan[record['index']]['continuity_source_key']
     def save():
         update_batch_progress(state)
         atomic_json(file,state)
@@ -629,6 +666,7 @@ def generate_agent_media(scenes,config,cancel,log,on_media):
     generator=AgentMedia('flow',mode='cdp',flow_project_url=config['flow_url'],share_google_profile=config.get('share_google_profile',True),cancel=cancel,log=lambda m,level='info':log(m),**browser_options({**config,'provider':'flow'}))
     # Recover/Download Generated Batch is strictly a download action. Old quota
     # notices must not abort collection of assets that already exist.
+    generator.reference_collection=reference_records is not None
     generator.available_only=bool(config.get('_recover_only'))
     # An explicit Generate Images action authorizes one bounded request for
     # unmatched images after the idle scan, even if unrelated tiles lack labels.
@@ -641,14 +679,17 @@ def generate_agent_media(scenes,config,cancel,log,on_media):
     if config.get('image_agent'):
         requested=preferred(config)
         if state.get('preferred_image_model')!=requested:
-            state.update(preferred_image_model=requested,active_image_model=requested,exhausted_image_models=[])
+            state.update(preferred_image_model=requested,active_image_model=requested)
+        exhausted=state.setdefault('exhausted_image_models',[])
+        if state.get('active_image_model',requested) in exhausted:
+            state['active_image_model']=next((m for m in IMAGE_MODELS if m not in exhausted),requested)
         generator.agent_image_model=state.get('active_image_model',requested)
         generator.agent_image_fallback=True # reconcile quota failures even when automatic switching is disabled
     recovered=set(config.get('_recovered_batches',[]))
     # A manually submitted prompt may never have reached our submit click, so
     # local status alone cannot prove it was unsent. Older versions saved the
     # prompt file before preparation; retain that evidence on migration too.
-    prepared_text='\n'.join(p.read_text('utf-8') for p in Path(config['project']).glob('agent_batch_*.txt'))
+    prepared_text='\n'.join(p.read_text('utf-8') for p in Path(config['project']).glob('reference_agent_batch_*.txt' if reference_records is not None else 'agent_batch_*.txt'))
     export_file=Path(config['project'])/'manual_batch_export.json'
     if export_file.exists():
         exported_plan=json.loads(export_file.read_text('utf-8'))
@@ -719,10 +760,20 @@ def generate_agent_media(scenes,config,cancel,log,on_media):
         elif r['status']=='complete':r['status']='submitted'
     if reused:log(f'Reused {reused} verified local scene outputs; no new download or generation for those scenes.')
     save()
-    size=max(1,int(config.get("image_batch_size",6))) if config.get("image_agent") else 6
+    from ai_studio_cinematic import enabled as cinematic_enabled
+    video_size=max(1,int(config.get('animate_video_batch_size',5)))
+    size=max(1,int(config.get("image_batch_size",6)))
     from ai_studio_parts import scene_range
-    first,last=scene_range(config,len(records)) if config.get('image_agent') else (0,len(records))
+    first,last=scene_range(config,len(records))
     groups=reference_groups([r for r in records if first<=r['index']<last],size)
+    if cinematic_enabled(config):
+        selected=[r for r in records if first<=r['index']<last]
+        if config.get('cinematic_media_kind') in ('video','image'):selected=[r for r in selected if r['kind']==config['cinematic_media_kind']]
+        groups=reference_groups([r for r in selected if r['kind']=='video'],video_size)+reference_groups([r for r in selected if r['kind']=='image'],size)
+    if config.get('character_consistency'):
+        groups=cast_groups(selected if cinematic_enabled(config) else [r for r in records if first<=r['index']<last],size=size,video_size=video_size)
+    if not cinematic_enabled(config) and not config.get('character_consistency') and not config.get('image_agent'):
+        groups=reference_groups([r for r in records if first<=r['index']<last and r['kind']=='video'],video_size)+reference_groups([r for r in records if first<=r['index']<last and r['kind']=='image'],size)
     if config.get('_recover_only') and '_exported_groups' in config:
         by_token={r['token']:r for r in records}
         groups=[]
@@ -731,6 +782,7 @@ def generate_agent_media(scenes,config,cancel,log,on_media):
                 raise ValueError('Exported batch no longer matches this scene plan. Export again; saved images retained.')
             group=[by_token[token] for token in tokens]
             if group:groups.append((group[0]['index'],group))
+    log(f'Agent batch sizes: images {size}; video clips {video_size}. Per-scene reference assignments are preserved.')
     progress=state.setdefault('batch_progress',{})
     for _,group in groups:
         batch_id=fingerprint([r['token'] for r in group])
@@ -769,25 +821,32 @@ def generate_agent_media(scenes,config,cancel,log,on_media):
         if start not in recovered and any(possibly_sent(r) and r['status']=='pending' for r in missing):
             log('Retry verification: this batch was prepared previously and may have been submitted manually. Checking Flow outputs before any new submission.')
             if collect_or_recover(missing,start,verify_existing=True):
-                return generate_agent_media(scenes,{**config,'_recovered_batches':list(recovered)},cancel,log,on_media)
+                return generate_agent_media(scenes,{**config,'_recovered_batches':list(recovered)},cancel,log,on_media,reference_records=reference_records)
             log('Previously generated batch recovered and saved; no prompts resubmitted.')
             continue
         if pending:
             if any(r['status']!='pending' for r in missing):
                 if collect_or_recover([r for r in missing if r['status']!='pending'],start):
-                    return generate_agent_media(scenes,{**config,'_recovered_batches':list(recovered)},cancel,log,on_media)
+                    return generate_agent_media(scenes,{**config,'_recovered_batches':list(recovered)},cancel,log,on_media,reference_records=reference_records)
+            if cinematic_enabled(config):
+                from ai_studio_cinematic import handoff
+                batch_config=handoff(scenes,records,pending[0],batch_config,cancel,log)
             prompt=batch_prompt(pending,batch_config)
-            prompt_file=Path(config['project'])/f'agent_batch_{batch_number:03d}.txt'
+            prompt_file=Path(config['project'])/f'{"reference_agent_batch" if reference_records is not None else "agent_batch"}_{batch_number:03d}.txt'
             prompt_file.write_text(prompt,encoding='utf-8')
             for r in pending:
                 r['preparation_started']=True;r.pop('handover_unsubmitted',None)
             save() # persisted before any browser preparation/manual submit
             # Open the shared profile before letting the reference driver's
             # Puppeteer connection attach to the same existing project.
-            with generator._session(headless=False) as ctx:generator._batch_page(ctx)
-            prepare_agent_prompt(batch_config,prompt_file,batch_config.get('references',[]),cancel,log)
             with generator._session(headless=False) as ctx:
-                page=generator._batch_page(ctx);page.set_default_timeout(5000)
+                page=generator._batch_page(ctx)
+                # The session resolves the actual browser/account CDP port.
+                # Keep it alive while Puppeteer attaches; config defaults may
+                # still point at the legacy shared-profile port.
+                prepare_agent_prompt({**batch_config,'_agent_cdp_port':generator.cdp_port},
+                                     prompt_file,batch_config.get('references',[]),cancel,log)
+                page.set_default_timeout(5000)
                 composer=page.locator('div.ProseMirror[contenteditable=true]').first
                 text=composer.inner_text()
                 if not all(r['token'] in text for r in pending):raise RuntimeError('Prepared Agent prompt is incomplete. No generation submitted.')
@@ -811,6 +870,6 @@ def generate_agent_media(scenes,config,cancel,log,on_media):
                 save();generator.fresh_submission=True
                 log('Agent batch submitted. Waiting for positively matched outputs…')
         if collect_or_recover([r for r in group if r['status']!='complete'],start):
-            return generate_agent_media(scenes,{**config,'_recovered_batches':list(recovered)},cancel,log,on_media)
+            return generate_agent_media(scenes,{**config,'_recovered_batches':list(recovered)},cancel,log,on_media,reference_records=reference_records)
         log(f'Agent batch {batch_number} complete. All outputs matched and saved.')
     return records

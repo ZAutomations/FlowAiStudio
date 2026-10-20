@@ -4,7 +4,7 @@ Only two workspace tabs are included: **AI Studio** and **Animate**. Voice, audi
 
 ## Start
 
-1. Open **Setup.bat** once. It creates this app's own Python environment under %LOCALAPPDATA%/FlowAiStudio on C: and installs dependencies. Models and binaries stay in this app folder. Python, Node, FFmpeg, FFprobe, Kokoro models and all installed Piper voices are bundled.
+1. Open **Setup.bat** once. It creates this app's own Python environment under %USERPROFILE%/.flow_ai_studio on C: and installs dependencies. Models and binaries stay in this app folder. Python, Node, FFmpeg, FFprobe, Kokoro models and all installed Piper voices are bundled.
 2. Open **FlowAiStudio.bat**.
 3. Add/login a Google browser account in the app. Google Chrome and the Microsoft Edge WebView2 runtime must be installed on the computer. The first dependency installation needs internet; Gemini and browser generation always need internet.
 

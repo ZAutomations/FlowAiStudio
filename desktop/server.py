@@ -168,6 +168,16 @@ def create_app(store=None, jobs=None, token=None):
                 continue
         return {'references': previews, 'expected': inventory['expected'], 'missing': inventory['missing']}
 
+    @app.get('/api/prompt-guide')
+    def prompt_guide():
+        from .prompt_guide import content
+        return content()
+
+    @app.post('/api/animate/continuity-ledger')
+    def animate_ledger(body:dict):
+        project=Path(body.get('project','')).expanduser().resolve()
+        return {'ledger':read(project/'continuity_ledger.json') or None}
+
     @app.post('/api/studio/cast-review')
     def studio_cast_review(body: dict):
         project = Path(body.get('project', '')).expanduser().resolve()
@@ -205,7 +215,7 @@ def create_app(store=None, jobs=None, token=None):
             for row in payload['rows']:validate('animate' if kind=='animate-batch' else 'studio',{**payload,**row,'action':'build'},settings)
         else:
             if kind=='animate' and payload.get('action') in ('new','import'):
-                payload=dict(payload);source=payload.pop('project','');payload['animate_source']=payload.get('animate_source') or source
+                payload=dict(payload);source=payload.pop('project','');payload['animate_source']=(payload.get('animate_source') or source) if payload.get('action')=='import' else ''
                 payload.pop('source_project',None)
             occupied=[j['payload'].get('project') for j in jobs.list() if j['state'] not in ('completed','failed','stopped','interrupted') and j['payload'].get('project')]
             payload=prepare(payload,settings,occupied);validate(kind,payload,settings)

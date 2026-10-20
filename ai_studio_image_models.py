@@ -18,6 +18,7 @@ def batch_instructions(config):
                 'Do not switch models or accounts. '+refusal_instructions())
     exhausted=[m for m in IMAGE_MODELS if m in config.get('exhausted_image_models',[])]
     available=[m for m in IMAGE_MODELS if m not in exhausted]
+    if model in exhausted and available:model=available[0]
     order=' → '.join(available)
     skip=(' Already quota-exhausted for this account/project: '+', '.join(exhausted)+'. Skip these models in this and every later batch; do not try them again or reset to Pro.' if exhausted else '')
     return (
@@ -51,6 +52,8 @@ def quota_models(text):
     """Require an explicit model quota statement, not an offered alternative."""
     name = r'(Nano Banana (?:Pro|2\.1|2 Lite))'
     patterns = (
+        r'(?:reached|exhausted|used up)[^\n]{0,50}?(?:quota|limit)[^\n]{0,60}?' + name,
+        r'(?:quota|limit)[^\n]{0,40}?(?:for|of)\s*(?:[🍌 ]*)' + name + r'[^\n]{0,40}?(?:has been|is|was)?\s*(?:reached|exhausted)',
         r'(?:quota|limit)[^\n]{0,90}?' + name + r'[^\n]{0,60}?(?:reached|exhausted|used up)',
         name + r'[^\n]{0,70}?(?:quota|limit)[^\n]{0,50}?(?:reached|exhausted|used up)',
     )

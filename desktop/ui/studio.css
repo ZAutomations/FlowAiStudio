@@ -23,3 +23,49 @@ body.studio-view header{position:fixed;top:0;left:280px;right:0;height:60px;z-in
 @media(max-width:700px){.studio-action-row{align-items:flex-start;flex-direction:column;gap:4px}.studio-action-label{flex-basis:auto}}
 
 .camera-transition-card .form-grid>.full{grid-column:1/-1}.camera-transition-card .help{line-height:1.6}
+
+/* Animate full-story references: keep review and library actions grouped. */
+.studio-output-grid.animate-output-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+.animate-reference-grid>.full{grid-column:1/-1}
+.animate-reference-grid>.actions{display:flex;flex-wrap:wrap;gap:7px}
+.animate-reference-grid>.actions button{flex:1 1 145px;font-size:11px}
+.animate-reference-grid>.field[hidden]{display:none}
+@media(max-width:960px){.studio-output-grid.animate-output-grid{grid-template-columns:1fr}}
+
+.main-character-row{display:grid;grid-template-columns:1fr 2fr auto auto;gap:8px;align-items:end;margin-bottom:10px}.main-character-row input{width:100%}@media(max-width:1000px){.main-character-row{grid-template-columns:1fr 1fr}.main-character-row label{grid-column:1/-1}}
+
+.animate-extra-tools{width:100%;font-size:11px;color:var(--muted)}
+.animate-extra-tools>summary{cursor:pointer;padding:5px 0}
+.animate-extra-tools[open]{max-height:180px;overflow:auto}
+
+/* Compact responsive workspace: rows follow the workflow; long cards scroll locally. */
+#workflow-form[data-kind="animate"],#workflow-form[data-kind="studio"]{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;align-items:start}
+#workflow-form>.studio-grid,#workflow-form>.studio-output-grid,#workflow-form>.studio-editor-grid,#workflow-form>.studio-project-row{display:contents}
+#workflow-form>.studio-batch-card{grid-column:1/-1;max-height:260px}
+#workflow-form .studio-card{padding:12px;margin:0;max-height:440px;overflow:auto;scrollbar-gutter:stable;scrollbar-width:thin;scrollbar-color:var(--border) transparent;overscroll-behavior:auto;border-radius:12px}
+#workflow-form .studio-card h3{font-size:13px;margin:0 0 10px;line-height:1.35}
+#workflow-form .studio-card .form-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;align-items:start}
+#workflow-form .studio-card .form-grid>.full{grid-column:1/-1}
+#workflow-form .studio-card .field{min-width:0;margin:0}
+#workflow-form .studio-card label{font-size:11px;line-height:1.4}
+#workflow-form .studio-card input,#workflow-form .studio-card select,#workflow-form .studio-card textarea{min-width:0;max-width:100%;font-size:11px;padding:7px 8px}
+#workflow-form .studio-card textarea{min-height:58px;max-height:150px;resize:vertical}
+#workflow-form .studio-card .help{font-size:10px;line-height:1.5;margin:6px 0;overflow-wrap:anywhere}
+#workflow-form .studio-card button{font-size:10px;padding:7px 9px;white-space:normal}
+#workflow-form .studio-card .actions{display:flex;flex-wrap:wrap;gap:6px}
+#workflow-form .studio-card .numeric-control{min-width:0}
+#workflow-form .studio-script textarea{height:180px;max-height:250px}
+#workflow-form .studio-scenes .scene-table-scroll{height:220px;max-height:260px;overflow:auto}
+#workflow-form .studio-scenes .scene-table{min-width:420px}
+#workflow-form .main-character-row{grid-template-columns:1fr 1fr;gap:5px;margin-bottom:8px}
+#workflow-form .main-character-row label{grid-column:1/-1}
+#workflow-form .animate-reference-grid>.actions button{flex:1 1 110px}
+#workflow-form .studio-card .form-grid>.field:has(textarea),#workflow-form .studio-card .form-grid>.field:has([name=project]),#workflow-form .studio-card .form-grid>.field:has([name=flow_url]),#workflow-form .studio-card .form-grid>.field:has([name=reference_files]){grid-column:1/-1}
+#workflow-form .animate-parts-card{border-color:var(--accent)}
+.studio-toolbar{padding:8px 12px}.studio-action-label{flex-basis:95px}.studio-toolbar .studio-execution button{padding:6px 8px}.studio-toolbar-title{margin-bottom:5px}
+@media(min-width:1700px){#workflow-form[data-kind="animate"],#workflow-form[data-kind="studio"]{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media(max-width:1199px){#workflow-form[data-kind="animate"],#workflow-form[data-kind="studio"]{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:760px){#workflow-form[data-kind="animate"],#workflow-form[data-kind="studio"]{grid-template-columns:minmax(0,1fr)}#workflow-form .studio-card{max-height:480px}.studio-toolbar{max-height:42vh;overflow:auto;overscroll-behavior:auto}.studio-action-label{flex-basis:auto}}
+@media(max-width:420px){#workflow-form .studio-card .form-grid{grid-template-columns:minmax(0,1fr)}}
+
+#workflow-form .studio-card h3{position:sticky;top:-12px;z-index:2;background:var(--secondary);padding:8px 0;border-bottom:1px solid var(--border)}

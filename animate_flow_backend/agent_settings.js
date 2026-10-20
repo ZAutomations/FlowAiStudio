@@ -52,7 +52,7 @@ async function saveAndVerifyAgentSettings(page,{videoModel='',imageModel='Nano B
 async function applyAgentSettings(page, { videoModel = '', imageModel = 'Nano Banana Pro', aspect = 'Flow', resolution = 'Flow', log = () => {} } = {}) {
     const ratio = String(aspect || 'Flow').trim();
     if (!['Flow', '16:9', '1:1', '9:16'].includes(ratio)) throw Error(`Unsupported video aspect ratio: ${ratio}`);
-    if (!['Flow','360p','720p'].includes(resolution)) throw Error('Choose Flow, 360p or 720p for Agent resolution.');
+    if (!['Flow','360p','720p','1080p'].includes(resolution)) throw Error('Choose Flow, 360p, 720p or 1080p for Agent resolution.');
     if (!await GR.openSettingsPanel(page)) throw Error('Could not open Agent settings. Generation stopped.');
     const imageResult = await GR.setSectionModel(page, 'image', imageModel);
     if (!imageResult.ok) throw Error(`Could not select image model: ${imageResult.why}`);

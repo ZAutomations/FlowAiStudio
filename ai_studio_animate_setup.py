@@ -10,7 +10,7 @@ from ai_studio_pipeline import atomic_json, check_cancel, fingerprint, valid_ima
 from zbot_browser_images import ZBotImageGenerator
 
 
-def project_tabs(port=10312):
+def project_tabs(port=9232):
     with urllib.request.urlopen(f'http://127.0.0.1:{port}/json/list', timeout=3) as response:
         tabs = json.load(response)
     return sorted({m.group(0) for t in tabs for m in [re.search(r'https://flow\.google\.com/project/[a-zA-Z0-9-]+', t.get('url', ''))] if m})
@@ -80,7 +80,7 @@ def reference_plan(config):
         context=' Visual style: '+config['style']+'. Continuity: '+config.get('continuity','')
         refs=[]
         for asset in config['cast_assets']:
-            prompt=('Create one full-body character identity reference, neutral pose, plain grey background, one person only. Fix face, age, hair, build, clothing and colors.' if asset['kind']=='character' else
+            prompt=('Create one isolated object identity reference on a plain neutral background. Fix its shape, material, colors, markings and condition. No people.' if asset['kind']=='prop' else 'Create one full-body character identity reference, neutral pose, plain grey background, one person only. Fix face, age, hair, build, clothing and colors.' if asset['kind']=='character' else
                     'Create one location identity reference. Establish the fixed architecture, layout, entrances and distinctive props. No people.')
             refs.append(dict(name=asset['name'],kind=asset['kind'],prompt=prompt+' No text. Identity: '+asset['name']+'. Approved design: '+asset['description']+context,
                              output=str(Path(config['project'])/'references'/(asset['name']+'.png'))))
@@ -105,24 +105,51 @@ def reference_plan(config):
     return refs
 
 
+def main_character_files(config):
+    rows=config.get('main_character_references',[])
+    if isinstance(rows,str):
+        try:rows=json.loads(rows or '[]')
+        except ValueError:raise ValueError('Invalid Main Characters image list.')
+    if not isinstance(rows,list) or len(rows)>40:raise ValueError('Main Characters supports up to 40 named image paths.')
+    names=set();clean=[]
+    for row in rows:
+        if not isinstance(row,dict):raise ValueError('Each main character needs an identifier and local image path.')
+        name=row.get('name','');path=row.get('path','')
+        if not isinstance(name,str) or not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,39}',name) or name.casefold() in names:
+            raise ValueError('Main character identifiers must be unique and match the approved cast, e.g. DSPMalik or Ali.')
+        if not isinstance(path,str) or not valid_image(Path(path).expanduser()):raise ValueError('Choose a valid local image for main character '+name)
+        names.add(name.casefold());clean.append({'name':name,'path':path})
+    return clean
+
+
 def apply_fixed_dsp_reference(config,refs,cancel,log):
-    source=str(config.get('dsp_malik_reference_path','')).strip()
-    if not source:return
-    path=Path(source).expanduser()
-    if not valid_image(path):raise ValueError('Permanent DSPMalik image path is missing or is not a valid image. Select an existing image; DSPMalik was not generated.')
-    matches=[r for r in refs if r['kind']=='character' and re.sub(r'[^a-z0-9]','',r['name'].lower()) in ('dspmalik','dsp')]
-    if len(matches)>1:raise ValueError('Both DSP and DSPMalik are in the reference plan. Keep one DSPMalik identity before using the permanent image.')
-    if not matches:
-        log('Permanent DSPMalik image retained in settings; this story has no DSPMalik/DSP character to replace.')
-        return
+    # Keep the historical entry point for project/manual-reference compatibility.
+    rows=main_character_files(config)
+    legacy=str(config.get('dsp_malik_reference_path','')).strip()
+    legacy_matches=[r for r in refs if r['kind']=='character' and re.sub(r'[^a-z0-9]','',r['name'].lower()) in ('dspmalik','dsp')]
+    if legacy and not any(re.sub(r'[^a-z0-9]','',r['name'].lower()) in ('dspmalik','dsp') for r in rows):
+        if len(legacy_matches)>1:raise ValueError('Both DSP and DSPMalik are in the reference plan. Keep one DSPMalik identity before using the permanent image.')
+        if not valid_image(legacy):raise ValueError('Permanent DSPMalik image path is missing or is not a valid image.')
+        if legacy_matches:rows.append({'name':legacy_matches[0]['name'],'path':legacy})
+        else:log('Permanent DSPMalik image retained; this story has no DSPMalik/DSP character to replace.')
+    for row in rows:
+        name=row['name'];path=Path(row['path']).expanduser()
+        ref=next((r for r in refs if r['name']==name and r['kind']=='character'),None)
+        if ref is None:
+            log('Main character '+name+' is not in this story’s approved cast; local image retained for another story.')
+            continue
+        _copy_main_character(config,ref,path,name,cancel,log)
+
+
+def _copy_main_character(config,ref,path,name,cancel,log):
     from PIL import Image
-    output=Path(matches[0]['output'])
+    output=Path(ref['output'])
     check_cancel(cancel)
     if valid_image(output):
         with Image.open(path) as source_image,Image.open(output) as saved:
             a=source_image.convert('RGB');b=saved.convert('RGB')
             if a.size==b.size and a.tobytes()==b.tobytes():
-                log('Permanent DSPMalik reference already saved; generation skipped.')
+                log(f'Main character {name} reference already saved; generation skipped.')
                 return
         import hashlib
         history=Path(config['project'])/'references'/'fixed_reference_history'
@@ -131,8 +158,8 @@ def apply_fixed_dsp_reference(config,refs,cancel,log):
         if not backup.exists():shutil.copy2(output,backup)
     output.parent.mkdir(parents=True,exist_ok=True)
     ZBotImageGenerator._save_image_bytes(path.read_bytes(),output,cancel)
-    if not valid_image(output):raise RuntimeError('Could not save permanent DSPMalik reference. No replacement reference generated.')
-    log('Permanent DSPMalik image copied from '+str(path)+' as '+output.name+'; AI generation skipped for this character.')
+    if not valid_image(output):raise RuntimeError('Could not save main character '+name+'. No replacement reference generated.')
+    log(f'Main character {name} image copied from '+str(path)+' as '+output.name+'; AI generation skipped for this character.')
 
 
 def ensure_references(config, cancel, log, plan_designs=None):
@@ -142,11 +169,12 @@ def ensure_references(config, cancel, log, plan_designs=None):
         return []
     if config.get('references') or not config.get('auto_reference', True):
         supplied=list(config.get('references', []))
-        if config.get('dsp_malik_reference_path'):
+        if config.get('dsp_malik_reference_path') or config.get('main_character_references'):
             refs=[{'name':Path(p).stem,'kind':'character','output':str(Path(config['project'])/'references'/(Path(p).stem+'.png'))} for p in supplied]
             apply_fixed_dsp_reference(config,refs,cancel,log)
+            fixed={r['name'] for r in main_character_files(config)}
             supplied=[str(Path(config['project'])/'references'/(Path(p).stem+'.png'))
-                if re.sub(r'[^a-z0-9]','',Path(p).stem.lower()) in ('dspmalik','dsp') else p for p in supplied]
+                if Path(p).stem in fixed or (config.get('dsp_malik_reference_path') and re.sub(r'[^a-z0-9]','',Path(p).stem.lower()) in ('dspmalik','dsp')) else p for p in supplied]
         return supplied
     refs = reference_plan(config)
     directory = Path(config['project']) / 'references'
@@ -211,19 +239,6 @@ def ensure_references(config, cancel, log, plan_designs=None):
         raise RuntimeError('Create the missing reference images first: '+', '.join(ref['name'] for ref in missing_refs)+'. Batch export/download never generates references.')
     log('Generating missing named reference images only: ' + ', '.join(ref['name'] for ref in missing_refs))
     check_cancel(cancel)
-    setup = Path(config['agent_tool_dir']) / 'prepare_reference_mode.js'
-    from desktop.browser_accounts import browser_options
-    account_options=browser_options({**config,'provider':'flow'})
-    browser = ZBotImageGenerator('flow', mode='cdp', share_google_profile=config.get('share_google_profile',True), flow_project_url=config['flow_url'], cancel=cancel, **account_options)
-    with browser._session(headless=False) as ctx:
-        browser._batch_page(ctx)
-    result = subprocess.run([shutil.which('node') or 'node', str(setup), config['flow_url'], str(browser.cdp_port)], cwd=setup.parent, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=45, creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
-    if result.returncode:
-        raise RuntimeError('Reference Image mode setup failed: ' + (result.stdout + result.stderr)[-1200:])
-    check_cancel(cancel)
-    generator = ZBotImageGenerator('flow', mode='cdp', share_google_profile=config.get('share_google_profile',True), flow_project_url=config['flow_url'], cancel=cancel, flow_aspect_ratio='16:9', log=lambda m, level='info': log(m), **account_options)
-    log('Reference queue: submit up to 6 separate prompts before waiting for their matched images.')
-    results = generator.generate_batch([(r['prompt'], r['output']) for r in missing_refs], batch_size=6, timeout=300)
-    if not results or not all(result[0] for result in results):
-        raise RuntimeError('Named references are incomplete. Resume to recover the saved requests.')
+    from ai_studio_reference_agent import generate
+    generate(config,refs,cancel,log)
     return [r['output'] for r in refs]

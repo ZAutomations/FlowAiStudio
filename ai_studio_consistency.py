@@ -103,12 +103,17 @@ def upload_reference_library(adapter,config,log):
         from ai_studio_animate_media import prepare_agent_prompt
         from zbot_browser_images import ZBotImageGenerator
         from desktop.browser_accounts import browser_options
+        connection={**config,'provider':'flow','share_google_profile':config.get('share_google_profile',True)}
         browser=ZBotImageGenerator('flow',mode='cdp',flow_project_url=config['flow_url'],
-            share_google_profile=config.get('share_google_profile',True),cancel=adapter._zb_cancel,
-            **browser_options({**config,'provider':'flow'}))
-        with browser._session(headless=False) as ctx:browser._batch_page(ctx)
+            share_google_profile=connection['share_google_profile'],cancel=adapter._zb_cancel,
+            log=lambda m,level='info':log(m),**browser_options(connection))
         prompt=project/'reference_library_upload.txt'
         prompt.write_text('Upload the complete saved reference library only. Do not generate scene media.',encoding='utf-8')
-        log(f'Uploading/reusing all {len(config["references"])} reference images in this Flow project before finishing…')
-        prepare_agent_prompt({**config,'_upload_references_only':True},prompt,config['references'],adapter._zb_cancel,log)
+        # Keep the verified browser connection alive through the Node upload.
+        # Use the actual session port, never a second independently defaulted port.
+        with browser._session(headless=False) as ctx:
+            browser._batch_page(ctx)
+            log(f'Uploading/reusing all {len(config["references"])} reference images on {browser.browser_label} port {browser.cdp_port}…')
+            prepare_agent_prompt({**config,'_upload_references_only':True,'_agent_cdp_port':browser.cdp_port},
+                                 prompt,config['references'],adapter._zb_cancel,log)
         log('All supplied saved references are available in Flow. Future batches attach only their assigned references.')
