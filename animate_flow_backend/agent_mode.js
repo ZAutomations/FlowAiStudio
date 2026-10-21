@@ -696,10 +696,19 @@ async function refImageAlreadyPresent(page, box, name) {
     await require('./reference_picker_images').selectImages(page,{log});
     const pk = await page.evaluate(pickerFn);
     const choice = MT.chooseMentionTile(pk.clickable || [], name);
+    const selectable=await page.evaluate(name=>{
+        const key=s=>String(s||'').trim().replace(/\.(png|jpe?g|webp)$/i,'').toLowerCase();
+        return [...document.querySelectorAll('.cdk-overlay-pane button.asset-item')].some(b=>{
+            if(!b.getBoundingClientRect().width || b.disabled || b.getAttribute('aria-disabled')==='true' || b.getAttribute('aria-busy')==='true')return false;
+            if(key(b.querySelector('.asset-title')?.textContent||b.textContent)!==key(name))return false;
+            const image=b.querySelector('img');
+            return !!image && image.complete && image.naturalWidth>0 && !b.querySelector('[role="progressbar"],mat-progress-spinner');
+        });
+    },name);
     await page.keyboard.press('Escape');
     await wait(400);
     await clearPromptBox(page, box);
-    return ((choice.reason === 'ok' && choice.kind === 'image') || (choice.reason==='no-type' && choice.inner && /\.(png|jpe?g|webp)$/i.test((choice.inner.text||'').trim()))) ? choice : null;
+    return selectable && ((choice.reason === 'ok' && choice.kind === 'image') || (choice.reason==='no-type' && choice.inner && /\.(png|jpe?g|webp)$/i.test((choice.inner.text||'').trim()))) ? choice : null;
 }
 
 async function uploadRefThroughPicker(page, box, file) {
@@ -747,9 +756,9 @@ async function uploadRefThroughPicker(page, box, file) {
         await input.uploadFile(file);
     }
 
-    // The upload is a round trip; give it room, then close the picker and clear
-    // the "@" so the real prompt starts from an empty box.
-    await wait(7000);
+    // File chooser acceptance only starts the transfer. Never close its UI
+    // while Flow is uploading/processing the new reference.
+    await require('./reference_upload_ready').waitForUploadIdle(page, {log});
     await page.keyboard.press('Escape');
     await wait(500);
     await clearPromptBox(page, box);
@@ -1022,8 +1031,9 @@ async function uploadRefThroughPicker(page, box, file) {
 
             const okUpload = await uploadRefThroughPicker(page, box, r.file);
             if (okUpload) {
-                const verified=await refImageAlreadyPresent(page,box,r.name);
-                if(!verified)throw Error(`Uploaded reference ${r.name} is not yet verifiable. Retry library check; no scene submitted.`);
+                const verified=await require('./reference_upload_ready').waitForReference(
+                    ()=>refImageAlreadyPresent(page,box,r.name), {log,name:r.name});
+                if(!verified)throw Error(`Uploaded reference ${r.name} is not yet verifiable. No scene submitted.`);
                 rememberRef(r);ready++;
             } else missing++;
         }

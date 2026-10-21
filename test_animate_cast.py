@@ -72,6 +72,16 @@ class AnimateCastTests(unittest.TestCase):
         records=[dict(index=0,kind='video',reference_names=grouped[0]['reference_names']),dict(index=1,kind='video',reference_names=['DSP'])]
         self.assertEqual([len(g) for _,g in cast_groups(records)],[1,1])
         self.assertEqual((self.root/'cast_analysis.json').read_bytes(),before)
+    def test_unapproved_ready_cast_can_review_current_design_without_ai(self):
+        self.data['approved']=False
+        atomic_json(self.root/'cast_analysis.json',self.data)
+        self.config.update(planning_source='chatgpt_ready',reference_design='Updated period designs')
+        approve(self.adapter,queue.Queue(),self.config,self.data)
+        saved=json.loads((self.root/'cast_analysis.json').read_text('utf-8'))
+        self.assertTrue(saved['approved'])
+        self.assertTrue((self.root/'cast_analysis.before_design_review.json').exists())
+        self.adapter._zb_llm.assert_not_called()
+
     def test_worker_build_pauses_for_cast_review_before_voice_or_browser(self):
         from desktop.worker import studio
         atomic_json(self.root/'cast_analysis.json',{**self.data,'approved':False})

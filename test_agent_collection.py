@@ -59,7 +59,7 @@ class AgentCollectionTests(unittest.TestCase):
         self.agent._queued_error.assert_not_called()
     def test_empty_prompt_is_not_cached_and_can_be_read_on_retry(self):
         asset=self.asset(0)
-        self.page.locator.return_value.first.locator.return_value.inner_text.return_value='generated image'
+        self.page.locator.return_value.first.locator.return_value.first.evaluate.return_value='generated image'
         self.page.locator.return_value.last.inner_text.side_effect=['',self.records[0]['token']]
         self.assertEqual(self.agent._asset_prompt(self.page,asset),'')
         self.assertNotIn(asset['asset_id'],self.agent._flow_asset_prompts)
@@ -67,11 +67,11 @@ class AgentCollectionTests(unittest.TestCase):
 
     def test_uploaded_reference_uses_exact_filename_without_prompt_popup(self):
         self.agent._flow_reference_filenames={'dsp.png'}
-        footer=self.page.locator.return_value.first.locator.return_value
-        footer.inner_text.return_value='image\nDSP.png'
+        footer=self.page.locator.return_value.first.locator.return_value.first
+        footer.evaluate.return_value='image\nDSP.png'
         self.assertEqual(self.agent._asset_prompt(self.page,self.asset(0)),'FLOW_REFERENCE:DSP.png')
         footer.click.assert_not_called()
-        footer.inner_text.return_value='image\nDSPOffice.png'
+        footer.evaluate.return_value='image\nDSPOffice.png'
         self.page.locator.return_value.last.inner_text.return_value='another location'
         self.assertEqual(self.agent._asset_prompt(self.page,self.asset(1)),'another location')
 

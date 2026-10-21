@@ -264,23 +264,29 @@ class AgentMedia(ZBotImageGenerator):
         tile=page.locator(f'[data-ai-studio-media="{asset_id}"]').first
         try:
             page.keyboard.press('Escape')
-            tile.hover(timeout=2500)
+            tile.scroll_into_view_if_needed(timeout=5000)
+            tile.hover(force=True,timeout=5000)
             # Uploads have their own new Flow IDs, different from the original
             # reference-generation IDs. Their exact approved filenames identify
             # references; they have no generation-prompt popup to read.
-            footer=tile.locator('.footer-left').inner_text(timeout=1500)
-            reference=next((line.strip() for line in footer.splitlines()
+            footer=tile.locator('.footer-left').first
+            # Flow hides hover-footer text while the video is playing. Read
+            # exact filename from DOM; hidden visibility is not a missing asset.
+            label=footer.evaluate("el => el.getAttribute('aria-label') || el.textContent || ''")
+            reference=next((line.strip() for line in label.splitlines()
                             if line.strip().casefold() in getattr(self,'_flow_reference_filenames',set())),None)
             if reference:
                 text='FLOW_REFERENCE:'+reference
                 self._flow_asset_prompts[asset_id]=text
                 return text
-            # Escape may animate the prior popover out. Do not read that old
-            # prompt as if it belonged to the tile we click next.
-            page.locator('.cdk-overlay-popover .prompt-text:visible').last.wait_for(state='hidden',timeout=2500)
-            tile.locator('.footer-left').click(timeout=2500)
+            # Ensure the preceding popup is gone, then open THIS exact footer.
+            try:page.locator('.cdk-overlay-popover .prompt-text:visible').last.wait_for(state='hidden',timeout=1500)
+            except Exception:
+                page.keyboard.press('Escape')
+                page.locator('.cdk-overlay-popover .prompt-text:visible').last.wait_for(state='hidden',timeout=2500)
+            footer.click(force=True,timeout=4000)
             content=page.locator('.cdk-overlay-popover .prompt-text:visible').last
-            content.wait_for(state='visible',timeout=2500)
+            content.wait_for(state='visible',timeout=5000)
             text=content.inner_text()
             if text.strip():self._flow_asset_prompts[asset_id]=text
             page.keyboard.press('Escape')
@@ -511,6 +517,19 @@ class AgentMedia(ZBotImageGenerator):
                 time.sleep(2)
 
 
+def prepare_batch_prompt(config,prompt_file,cancel,log):
+    """Upload a newly extracted continuation frame before reuse-only attachment."""
+    references=config.get('references',[])
+    previous=config.get('cinematic_previous_frame')
+    if previous:
+        frames=[p for p in references if Path(p).stem==previous]
+        if len(frames)!=1 or not valid_image(frames[0]):
+            raise RuntimeError('Continuation frame is missing or invalid. No generation submitted.')
+        log(f'Preparing continuity frame {Path(frames[0]).name} in Flow; existing cast references remain reused.')
+        prepare_agent_prompt({**config,'_upload_references_only':True},prompt_file,frames,cancel,log)
+    prepare_agent_prompt({**config,'_upload_references_only':False},prompt_file,references,cancel,log)
+
+
 def prepare_agent_prompt(config,prompt_file,references,cancel,log):
     for attempt in range(2):
         check_cancel(cancel)
@@ -676,7 +695,8 @@ def generate_agent_media(scenes,config,cancel,log,on_media,reference_records=Non
     for record in records:
         if record.get('asset_id') and record.get('token'):
             generator._flow_asset_prompts[record['asset_id']]=record['token']
-    if config.get('image_agent'):
+    has_images=any(r['kind']=='image' for r in records)
+    if has_images:
         requested=preferred(config)
         if state.get('preferred_image_model')!=requested:
             state.update(preferred_image_model=requested,active_image_model=requested)
@@ -704,7 +724,7 @@ def generate_agent_media(scenes,config,cancel,log,on_media,reference_records=Non
             if verify_existing:generator.available_only=True
             generator.collect(target,save,on_media)
             reports=getattr(generator,'completed_reported_quotas',())
-            if config.get('image_agent') and config.get('agent_image_fallback',True) and isinstance(reports,(tuple,list)) and reports:
+            if has_images and config.get('agent_image_fallback',True) and isinstance(reports,(tuple,list)) and reports:
                 exhausted=state.setdefault('exhausted_image_models',[])
                 for model in reports:
                     if model in IMAGE_MODELS and model not in exhausted:exhausted.append(model)
@@ -717,7 +737,7 @@ def generate_agent_media(scenes,config,cancel,log,on_media,reference_records=Non
             if verify_existing and any(r['status']!='complete' for r in target):
                 raise MissingAgentOutputs('Existing-output verification finished; unresolved scene outputs were not matched.')
         except ModelQuotaExhausted as error:
-            if not config.get('image_agent') or not config.get('agent_image_fallback',True):raise
+            if not any(r['kind']=='image' for r in target) or not config.get('agent_image_fallback',True):raise
             exhausted=state.setdefault('exhausted_image_models',[])
             for model in error.reported_models:
                 if model not in exhausted:exhausted.append(model)
@@ -774,6 +794,11 @@ def generate_agent_media(scenes,config,cancel,log,on_media,reference_records=Non
         groups=cast_groups(selected if cinematic_enabled(config) else [r for r in records if first<=r['index']<last],size=size,video_size=video_size)
     if not cinematic_enabled(config) and not config.get('character_consistency') and not config.get('image_agent'):
         groups=reference_groups([r for r in records if first<=r['index']<last and r['kind']=='video'],video_size)+reference_groups([r for r in records if first<=r['index']<last and r['kind']=='image'],size)
+    if not groups and config.get('cinematic_media_kind') in ('video','image'):
+        kind=config['cinematic_media_kind']
+        available=[r['index']+1 for r in records if r['kind']==kind]
+        bounds=f'{min(available)}-{max(available)}' if available else 'none in this plan'
+        raise ValueError(f'No {kind} scenes in selected range {first+1}-{last}. Available {kind} scene numbers: {bounds}. Change Part start/end scene fields before generating. No media was submitted.')
     if config.get('_recover_only') and '_exported_groups' in config:
         by_token={r['token']:r for r in records}
         groups=[]
@@ -796,13 +821,15 @@ def generate_agent_media(scenes,config,cancel,log,on_media,reference_records=Non
         if batch_marks['generated_successfully'] and batch_marks['downloaded_successfully']:
             log(f'Batch {batch_number}: Generated ✓ / Downloaded ✓; skipping browser scan.')
             continue
-        if config.get('image_agent') and config.get('agent_image_fallback',True):
+        image_batch=all(r['kind']=='image' for r in group)
+        generator.agent_image_fallback=image_batch
+        if image_batch and config.get('agent_image_fallback',True):
             order=IMAGE_MODELS[IMAGE_MODELS.index(state['preferred_image_model']):]
             if all(m in state.get('exhausted_image_models',[]) for m in order):
                 state['quota_verified_missing']=[r['index'] for r in missing];save()
                 raise ImageModelsExhausted('All configured Nano Banana models reached quota. Completed batches retained; account fallback may continue the next batch.')
         log(f'Agent batch {batch_number}/{len(groups)}: {len(missing)} remaining scene outputs.')
-        batch_config={**config,'agent_image_model':generator.agent_image_model,'exhausted_image_models':state.get('exhausted_image_models',[])} if config.get('image_agent') else config
+        batch_config={**config,'image_agent':True,'agent_image_model':generator.agent_image_model,'exhausted_image_models':state.get('exhausted_image_models',[])} if image_batch else config
         if 'reference_names' in group[0]:
             names={name for r in missing for name in r.get('reference_names',[])}
             batch_config={**batch_config,'references':[p for p in config.get('references',[]) if Path(p).stem in names],
@@ -844,8 +871,8 @@ def generate_agent_media(scenes,config,cancel,log,on_media,reference_records=Non
                 # The session resolves the actual browser/account CDP port.
                 # Keep it alive while Puppeteer attaches; config defaults may
                 # still point at the legacy shared-profile port.
-                prepare_agent_prompt({**batch_config,'_agent_cdp_port':generator.cdp_port},
-                                     prompt_file,batch_config.get('references',[]),cancel,log)
+                prepare_batch_prompt({**batch_config,'_agent_cdp_port':generator.cdp_port},
+                                     prompt_file,cancel,log)
                 page.set_default_timeout(5000)
                 composer=page.locator('div.ProseMirror[contenteditable=true]').first
                 text=composer.inner_text()
@@ -862,7 +889,7 @@ def generate_agent_media(scenes,config,cancel,log,on_media,reference_records=Non
                 submit=page.locator('button[aria-label="Start generation"]').first
                 for r in pending:
                     r['status']='submitting'
-                    if config.get('image_agent'):r['generation_model']=preferred(batch_config)
+                    if image_batch:r['generation_model']=preferred(batch_config)
                 save() # uncertain submission is never automatically replayed
                 submit.click(timeout=5000)
                 page.wait_for_function("() => !(document.querySelector('div.ProseMirror[contenteditable=true]')?.innerText||'').trim()",timeout=15000)

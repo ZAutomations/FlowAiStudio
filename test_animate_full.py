@@ -84,6 +84,22 @@ class FullAnimateTests(unittest.TestCase):
             self.assertEqual([len(g) for _,g in groups],([10,10,10,10,5] if size==10 else [20,20,5]))
             self.assertEqual([r['index'] for _,g in groups for r in g],list(range(45)))
 
+    def test_animate_image_batches_remember_quota_model_on_next_batch(self):
+        from ai_studio_animate_media import AgentMedia
+        prepared=[];submitted=[];configs=[];base=self.fake_agent(prepared,submitted)
+        class Agent(base):
+            def collect(agent,records,save,on_media):
+                super().collect(records,save,on_media)
+                agent.completed_reported_quotas=('Nano Banana Pro',)
+        def prepare(c,p,*args):
+            configs.append(dict(c));prepared.append(Path(p).read_text('utf-8'))
+        with patch('ai_studio_animate_media.AgentMedia',Agent),patch('ai_studio_animate_media.prepare_agent_prompt',side_effect=prepare):
+            generate_agent_media(self.scenes,{**self.config,'animate_count':0,'image_batch_size':6},threading.Event(),lambda m:None,lambda r:None)
+        self.assertEqual(len(configs),3)
+        self.assertTrue(all(c['image_agent'] for c in configs))
+        self.assertEqual([c['agent_image_model'] for c in configs],['Nano Banana Pro','Nano Banana 2.1','Nano Banana 2.1'])
+        self.assertIn('Skip these models',prepared[1])
+
     def test_default_partial_full_and_selected_models(self):
         partial=media_plan(self.scenes,self.config);self.assertEqual([r['kind'] for r in partial],['video']*3+['image']*10)
         for model in VIDEO_MODELS:

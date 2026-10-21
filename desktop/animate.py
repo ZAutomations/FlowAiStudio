@@ -92,7 +92,7 @@ def new_project(payload, settings, cancel, emit):
         config.update({k:options[k] for k in ('style_name','custom_style','continuity','resolution') if k in options})
         config['custom_style']=config.get('custom_style','')
     if payload['action']=='new':
-        config.update(script='',scene_seed=[],package_seed={},references=[],reference_files='',scene_reference_map=None)
+        config.update(scene_start=1,scene_end='',script='',scene_seed=[],package_seed={},references=[],reference_files='',scene_reference_map=None)
         for key in ('planning_source','cinematic_ready_prompts','ready_animation_script_key','cast_assets','reference_descriptions','thumbnail_paths','last_video','animation_ready','animation_video_ready','animation_image_ready'):
             config.pop(key,None)
     config.pop('animate_source',None)

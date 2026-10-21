@@ -26,6 +26,8 @@ class Events:
 
 def studio(payload, settings, cancel, animated=False, emit=event):
     event = emit
+    task_names={'approve-cast':'Review cast & locations','import-ready-animation':'Import ready animation story','cinematic-images':'Generate Remaining Images','cinematic-videos':'Generate Video Clips Only','references':'Create / reuse reference images','compile-part':'Compile Selected Part','render':'Render Video','build':'Build All'}
+    print('Task: '+task_names.get(payload.get('action'),str(payload.get('action','build')).replace('-', ' ').replace('_',' ').title()),flush=True)
     from ai_studio_pipeline import STYLE_PRESETS, check_cancel, split_script
     from ai_studio_workflow import VOICE_KEYS
     from zbot_ai_tab import ZBotAITabMixin
@@ -80,22 +82,22 @@ def studio(payload, settings, cancel, animated=False, emit=event):
         payload.update(ready['options'],title=ready['title'] or payload.get('title','Animate story'),script=ready['script'],scene_seed=ready['scenes'],ready_animation_script_key=fingerprint(ready['script']))
         saved={}
     options = saved.get('options', {})
-    if (saved and not animated and payload.get('action') in ('references','images','build')
+    if (saved and payload.get('action') in ('references','download-reference-images','images','build','cinematic-images','cinematic-videos','generate-missing')
             and options.get('character_consistency')
             and payload.get('browser_account',options.get('browser_account','')) != options.get('browser_account','')):
-        binding_state=read(project/'studio_agent_images.json')
+        binding_state=read(project/('animate_media.json' if animated else 'studio_agent_images.json'))
         prior_accounts={row.get('account','') for row in binding_state.get('account_sessions',[])}
         selected_is_stale=(payload.get('browser_account','') in prior_accounts
                            and payload.get('account_selection_from') != options.get('browser_account',''))
         from ai_studio_account_rotation import select_account
-        selected={**options,**payload,'project':str(project)}
+        selected={**options,**payload,'project':str(project),**({'workflow':'animate','provider':'flow'} if animated else {})}
         if not selected_is_stale:
             select_account(selected,options,cancel,lambda message:print('[INFO] '+message,flush=True))
             binding={key:selected[key] for key in ('browser_account','flow_url','_rotation_scope','_rotation_restored','_reference_flow_url')}
             payload.update(binding);options={**options,**binding}
     if saved and payload.get('action') != 'login' and options.get('character_consistency'):
         from ai_studio_account_rotation import restore
-        restored = {**options, **payload, 'project': str(project)}
+        restored = {**options, **payload, 'project': str(project), **({'workflow':'animate'} if animated else {})}
         restore(restored)
         for key in ('browser_account', 'flow_url', '_rotation_scope', '_rotation_restored', '_reference_flow_url'):
             if key in restored:
@@ -146,7 +148,7 @@ def studio(payload, settings, cancel, animated=False, emit=event):
         for key in ('image_path', 'audio_path', 'video_path'):
             if scene.get(key) and (not Path(scene[key]).is_absolute()):
                 scene[key] = str(project / scene[key])
-    if animated and payload.get('action')=='plan' and config.get('animate_multishot') and not any(s.get('image_path') or s.get('video_path') or s.get('audio_path') for s in previous):previous=[]
+    if animated and payload.get('action')=='plan' and config.get('animate_multishot') and config.get('planning_source')!='chatgpt_ready' and not any(s.get('image_path') or s.get('video_path') or s.get('audio_path') for s in previous):previous=[]
     if script == (saved.get('script') if saved else script) and previous and (animated or payload.get('action') != 'plan'):
         adapter.zb_scenes = previous
     else:

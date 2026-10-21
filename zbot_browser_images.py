@@ -244,12 +244,13 @@ class ZBotImageGenerator:
         and silently ignores the requested debugging port. Never touch personal
         profiles or a browser already running with a debugging connection.
         """
-        if self.browser_type != 'edge' or os.name != 'nt' or self._cdp_alive():
+        if self.browser_type not in ('edge','chrome') or os.name != 'nt' or self._cdp_alive():
             return
         profile = str(self._profile_path.resolve()).replace("'", "''")
+        executable='msedge.exe' if self.browser_type=='edge' else 'chrome.exe'
         script = r"""
 $target = '__PROFILE__'
-$roots = @(Get-CimInstance Win32_Process -Filter "name = 'msedge.exe'" -ErrorAction Stop | Where-Object {
+$roots = @(Get-CimInstance Win32_Process -Filter "name = '__BROWSER_EXE__'" -ErrorAction Stop | Where-Object {
     $command = $_.CommandLine
     if ($command -match '--type=' -or $command -match '--remote-debugging-port=') { return $false }
     $match = [regex]::Match($command, '--user-data-dir=(?:"([^"]+)"|([^ ]+))')
@@ -273,15 +274,15 @@ foreach ($root in $roots) {
     if (!$browserProcess.HasExited) { throw 'Dedicated Edge login window did not close. Finish any open dialog, then retry.' }
 }
 Write-Output $roots.Count
-""".replace('__PROFILE__', profile)
+""".replace('__PROFILE__', profile).replace('__BROWSER_EXE__',executable)
         encoded = base64.b64encode(script.encode('utf-16le')).decode('ascii')
         result = subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive',
                                  '-EncodedCommand', encoded], capture_output=True,
                                 text=True, timeout=30, creationflags=0x08000000)
         if result.returncode:
-            raise self._browser_error('Could not hand over the dedicated Edge login window. Close that window using Edge menu > Exit, then Retry. Saved login and progress retained.')
+            raise self._browser_error(f'Could not hand over the dedicated {self.browser_label} login window. Close that dedicated window using menu > Exit, then Retry. Saved login and progress retained.')
         if result.stdout.strip() != '0':
-            self._log('Dedicated Edge login closed; reopening the same saved profile with its generation connection.', 'info')
+            self._log(f'Dedicated {self.browser_label} login closed; reopening the same saved profile with its generation connection.', 'info')
 
     def _start_real_chrome(self):
         """Launch installed Chrome with its local debugging connection for generation."""

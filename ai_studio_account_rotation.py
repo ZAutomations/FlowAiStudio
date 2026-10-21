@@ -22,8 +22,10 @@ def select_account(config, previous, cancel, log):
     profile=profile/('profile_gemini' if config.get('share_google_profile',True) else 'profile_flow')
     if not profile.is_dir():
         raise ValueError('Sign in to the selected browser account using Login first. Existing project and progress are retained.')
-    root=Path(config['project']);file=root/'studio_agent_images.json'
+    root=Path(config['project']);file=root/('animate_media.json' if config.get('workflow')=='animate' else 'studio_agent_images.json')
     state=json.loads(file.read_text('utf-8')) if file.exists() else None
+    from ai_studio_animate_media import valid_video
+    def valid_output(record):return valid_video(record['output']) if record.get('kind')=='video' else valid_image(record['output'])
     if state:
         active=state.get('account_binding',{}).get('account',old_account)
         if active==account:
@@ -34,7 +36,7 @@ def select_account(config, previous, cancel, log):
         if active!=old_account:
             raise ValueError('The project account changed since this screen was loaded. Reopen the saved project before selecting another account.')
         for record in state.get('records',[]):
-            if record.get('status')=='complete' and not valid_image(record['output']):
+            if record.get('status')=='complete' and not valid_output(record):
                 raise RuntimeError('A completed scene image is missing locally. Recover it using its original account before switching.')
     check_cancel(cancel)
     from ai_studio_animate_setup import ensure_project
@@ -49,7 +51,7 @@ def select_account(config, previous, cancel, log):
     history.mkdir(parents=True,exist_ok=True)
     atomic_json(history/'binding.json',{'account':old_account,'flow_url':old_url,'new_account':account,'new_flow_url':url})
     if state:
-        atomic_json(history/'studio_agent_images.json',state)
+        atomic_json(history/file.name,state)
         sessions=[row for row in state.get('account_sessions',[]) if row['account']!=old_account]
         sessions.append({'account':old_account,'flow_url':old_url,'status':'manually_switched',
                          'models':state.get('exhausted_image_models',[])})
@@ -59,14 +61,14 @@ def select_account(config, previous, cancel, log):
                      exhausted_image_models=[],active_image_model=state.get('preferred_image_model','Nano Banana Pro'))
         state.pop('quota_verified_missing',None)
         for record in state['records']:
-            if valid_image(record['output']):
+            if valid_output(record):
                 record['status']='complete'
                 record.setdefault('source_account',old_account);record.setdefault('source_flow_url',old_url)
             else:
                 record.update(status='pending',handover_unsubmitted=True)
                 for key in ('asset_id','preparation_started','generation_model','pause_reason','last_error'):record.pop(key,None)
         # The archived manifest retains uncertain IDs for recovery on the old account.
-    for name in ('references/image_batches.json','manual_reference_images.json'):
+    for name in ('references/image_batches.json','manual_reference_images.json','reference_agent_media.json'):
         source=root/name
         if source.exists():
             destination=history/name;destination.parent.mkdir(parents=True,exist_ok=True)
@@ -95,7 +97,7 @@ def account_order(config):
 
 def restore(config):
     """Use the manifest binding even if the UI/job carries an older account."""
-    file=Path(config['project'])/'studio_agent_images.json'
+    file=Path(config['project'])/('animate_media.json' if config.get('workflow')=='animate' else 'studio_agent_images.json')
     if not file.is_file():return
     state=json.loads(file.read_text('utf-8'))
     active=state.get('account_binding')

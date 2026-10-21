@@ -60,7 +60,7 @@ def reviewed(config, scenes, approved=True):
     saved=json.loads(path.read_text('utf-8'))
     original=[{'narration':r['narration']} for r in saved.get('scenes',[])]
     data=current(config,original,approved=approved)
-    if ' '.join(' '.join(s['narration'].split()) for s in scenes) != ' '.join(' '.join(s['narration'].split()) for s in original):
+    if ' '.join(' '.join(s['narration'] for s in scenes).split()) != ' '.join(' '.join(s['narration'] for s in original).split()):
         raise ValueError('Cast narration differs from the current story. Saved references and media retained.')
     spans=[];position=0
     for row in data['scenes']:
@@ -137,7 +137,26 @@ def analyze(adapter,q,config):
 def approve(adapter,q,config,value):
     from ai_studio_cast import approve as accept
     from types import SimpleNamespace
-    data=reviewed(config,adapter.zb_scenes,approved=False)
+    try:
+        data=reviewed(config,adapter.zb_scenes,approved=False)
+    except ValueError as error:
+        # Explicit review of an imported, unapproved cast may adopt current
+        # design settings; never regenerate analysis or alter locked media.
+        from ai_studio_cast import locked
+        path=Path(config['project'])/'cast_analysis.json'
+        saved=json.loads(path.read_text('utf-8')) if path.exists() else {}
+        original_rows=[{'narration':r['narration']} for r in saved.get('scenes',[])]
+        if (str(error).startswith('Script, scenes or design settings changed')
+            and config.get('planning_source')=='chatgpt_ready' and not saved.get('approved')
+            and not locked(config)
+            and ' '.join(config['script'].split())==' '.join(' '.join(r['narration'] for r in original_rows).split())
+            and ' '.join(config['script'].split())==' '.join(' '.join(r['narration'] for r in adapter.zb_scenes).split())):
+            validate(value,original_rows,config['script'])
+            data={**saved,'source_key':source_key(config,original_rows)}
+            atomic_json(path.with_name('cast_analysis.before_design_review.json'),saved)
+            atomic_json(path,data)
+            q.put(('log','info','Imported cast review uses the current visual/design settings. Original narration and assignments retained; no AI analysis requested.'))
+        else:raise
     original=[{'narration':r['narration']} for r in data['scenes']]
     result=accept(SimpleNamespace(zb_scenes=original),q,config,value,allow_existing=not data.get("approved"))
     reviewed(config,adapter.zb_scenes)

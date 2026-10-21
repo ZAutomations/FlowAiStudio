@@ -32,7 +32,7 @@ def groups(scenes, limit=2400):
     return result
 
 
-def align(scenes, words, duration):
+def align(scenes, words, duration, partial=False):
     """Match source narration to recognized words; reject uncertain boundaries."""
     source = []; offsets = [0]
     for scene in scenes:
@@ -55,35 +55,102 @@ def align(scenes, words, duration):
         left = next((mapping[i] for i in range(offset-1, max(-1, offset-7), -1) if i in mapping), None)
         right = next((mapping[i] for i in range(offset, min(len(source), offset+6)) if i in mapping), None)
         if left is None or right is None or right <= left:
+            if partial:boundaries.append(None);continue
             raise RuntimeError('Cannot verify a scene boundary in continuous narration. Saved audio retained; no approximate scene durations used.')
         boundary = (timing[left][1] + timing[right][0]) / 2
-        if boundary <= boundaries[-1]: raise RuntimeError('Continuous narration has overlapping scene boundaries; audio retained.')
+        previous=next((v for v in reversed(boundaries) if v is not None),0)
+        if boundary <= previous: raise RuntimeError('Continuous narration has overlapping scene boundaries; audio retained.')
         boundaries.append(boundary)
     boundaries.append(duration)
     return boundaries
 
 
-@lru_cache(maxsize=1)
-def speech_model(model):
+def local_speech_model(model):
+    """Prefer complete installed CTranslate2 models before network/cache lookup."""
+    roots=[Path(__file__).resolve().parent/'models'/'whisper',
+           Path(__file__).resolve().parent/'setup'/'models'/'whisper']
+    if os.environ.get('FLOW_WHISPER_MODEL_DIR'):roots.insert(0,Path(os.environ['FLOW_WHISPER_MODEL_DIR']))
+    # Existing shared installation on this workstation; optional on other PCs.
+    roots.append(Path('D:/GitHub/ChangeGUI/models/whisper'))
+    for root in roots:
+        for folder in (root/f'faster-whisper-{model}',root/model,root):
+            required=('model.bin','config.json','tokenizer.json')
+            if all((folder/name).is_file() and (folder/name).stat().st_size>0 for name in required) and any((folder/name).is_file() for name in ('vocabulary.txt','vocabulary.json')):
+                return folder
+    return None
+
+
+def combine_verified_boundaries(scenes,candidates,duration):
+    """Choose existing ASR-anchored boundaries; never interpolate missing ones."""
+    tables=[]
+    for words in candidates:
+        try:tables.append((align(scenes,words,duration,partial=True),words))
+        except RuntimeError:continue
+    result=[0.0]
+    for index in range(1,len(scenes)):
+        options=[(bounds[index],words) for bounds,words in tables if bounds[index] is not None]
+        if not options:raise RuntimeError(f'No verified speech anchors for scene boundary {index+1}.')
+        boundary=options[0][0]
+        if boundary<=result[-1]:raise RuntimeError('Combined verified boundaries overlap; saved audio retained.')
+        result.append(boundary)
+    result.append(duration)
+    if not tables:raise RuntimeError('No reliable alignment candidates.')
+    return result,tables[0][1]
+
+
+_cuda_handles=[]
+
+def cuda_runtime_paths():
+    import sys
+    roots=[Path(v)/'nvidia' for v in sys.path if v]
+    roots.append(Path('D:/GitHub/ChangeGUI/.venv/Lib/site-packages/nvidia'))
+    roots.append(Path('D:/GitHub/ClippingTool/.venv/Lib/site-packages/nvidia'))
+    directories=[]
+    shared=Path('D:/GitHub/ChangeGUI/setup/dub_venv/Lib/site-packages/torch/lib')
+    if shared.is_dir():directories.append(shared)
+    for root in roots:
+        if root.is_dir():
+            directories.extend(dict.fromkeys(p.parent for p in root.glob('**/*.dll')))
+    for folder in dict.fromkeys(directories):
+        os.environ['PATH']=str(folder)+os.pathsep+os.environ.get('PATH','')
+        if hasattr(os,'add_dll_directory'):_cuda_handles.append(os.add_dll_directory(str(folder)))
+
+
+@lru_cache(maxsize=2)
+def speech_model(model,device='auto'):
     try:
         from faster_whisper import WhisperModel
+        import ctranslate2
     except ImportError as exc:
         raise RuntimeError('Continuous Narration requires faster-whisper. Run Setup.bat to install the alignment dependency.') from exc
+    cuda_runtime_paths()
+    local=local_speech_model(model)
     cache=Path.home()/'.flow_ai_studio'/'speech_models'
-    os.environ.setdefault('HF_HUB_DOWNLOAD_TIMEOUT','120')
-    cache.mkdir(parents=True,exist_ok=True)
-    return WhisperModel(model, device='cpu', compute_type='int8',download_root=str(cache))
+    os.environ.setdefault('HF_HUB_DOWNLOAD_TIMEOUT','120');cache.mkdir(parents=True,exist_ok=True)
+    kwargs={'local_files_only':True} if local else {'download_root':str(cache)}
+    selected='cuda' if device=='auto' and ctranslate2.get_cuda_device_count()>0 else ('cpu' if device=='auto' else device)
+    try:
+        recognizer=WhisperModel(str(local) if local else model,device=selected,compute_type='int8_float16' if selected=='cuda' else 'int8',**kwargs)
+    except RuntimeError:
+        if selected!='cuda':raise
+        selected='cpu';recognizer=WhisperModel(str(local) if local else model,device='cpu',compute_type='int8',**kwargs)
+    print(f'[INFO] Speech alignment: {model}; device {selected}; '+('int8_float16' if selected=='cuda' else 'int8'),flush=True)
+    return recognizer
 
 
 def transcribe(path, model, cancel, language=None):
-    recognizer = speech_model(model)
-    segments, _ = recognizer.transcribe(str(path), language=language, word_timestamps=True, beam_size=5, vad_filter=True)
-    words = []
-    for segment in segments:
-        check_cancel(cancel)
-        for word in segment.words or []:
-            words.append({'word': word.word, 'offset': word.start, 'duration': word.end-word.start})
-    return words
+    def recognize(recognizer):
+        segments,_=recognizer.transcribe(str(path),language=language,word_timestamps=True,beam_size=5,vad_filter=True)
+        words=[]
+        for segment in segments:
+            check_cancel(cancel)
+            for word in segment.words or []:words.append({'word':word.word,'offset':word.start,'duration':word.end-word.start})
+        return words
+    try:return recognize(speech_model(model))
+    except RuntimeError as error:
+        if not any(v in str(error).lower() for v in ('cuda','cublas','cudnn','out of memory')):raise
+        print('[WARN] GPU speech alignment unavailable; retrying this saved audio on CPU: '+str(error),flush=True)
+        return recognize(speech_model(model,'cpu'))
 
 
 def generate(adapter, q, config, tts, recognize=transcribe):
@@ -129,7 +196,7 @@ def generate(adapter, q, config, tts, recognize=transcribe):
                 run_ffmpeg(['-i', str(audio), '-ar', '48000', '-ac', '1', '-c:a', 'pcm_s16le', str(pcm)], adapter._zb_cancel)
             with wave.open(str(pcm), 'rb') as stream:
                 rate = stream.getframerate(); frames = stream.getnframes(); duration = frames/rate
-            model = config.get('narration_alignment_model', 'small')
+            model = config.get('narration_alignment_model', 'base')
             if model not in ('base', 'small', 'medium'): raise ValueError('Choose base, small or medium narration alignment.')
             timing_file = root / f'chunk_{number:04d}_timing_{model}.json'
             if timing_file.exists():
@@ -143,7 +210,36 @@ def generate(adapter, q, config, tts, recognize=transcribe):
                 else:
                     words = recognize(pcm, model, adapter._zb_cancel)
                 atomic_json(timing_file, {'words': words})
-            boundaries = align([scenes[i] for i in indices], words, duration)
+            chunk_scenes=[scenes[i] for i in indices]
+            try:
+                boundaries=align(chunk_scenes,words,duration)
+            except RuntimeError as initial:
+                # Repair only failed alignment on the SAME saved audio, never TTS.
+                language='hi' if re.search('[\u0900-\u097f]',text) else 'ur' if re.search('[\u0600-\u06ff]',text) else None
+                alternatives=['base','small','medium'][['base','small','medium'].index(model)+1:]
+                for stronger in alternatives:
+                    check_cancel(adapter._zb_cancel)
+                    q.put(('log','warning',f'Chunk {number}/{len(chunks)} boundary verification failed with {model}. Retrying local alignment with {stronger} on saved audio; narration will not be regenerated.'))
+                    repair=root/f'chunk_{number:04d}_timing_{stronger}.json'
+                    if repair.exists():candidate=json.loads(repair.read_text('utf-8'))['words']
+                    else:
+                        candidate=recognize(pcm,stronger,adapter._zb_cancel,language=language) if recognize is transcribe else recognize(pcm,stronger,adapter._zb_cancel)
+                        atomic_json(repair,{'words':candidate})
+                    try:boundaries=align(chunk_scenes,candidate,duration)
+                    except RuntimeError:continue
+                    words=candidate
+                    q.put(('log','success',f'Chunk {number}/{len(chunks)} boundaries verified with {stronger}; saved voice unchanged.'))
+                    break
+                else:
+                    cached_candidates=[]
+                    for saved_model in ('medium','small','base'):
+                        cached=root/f'chunk_{number:04d}_timing_{saved_model}.json'
+                        if cached.exists():cached_candidates.append(json.loads(cached.read_text('utf-8'))['words'])
+                    try:
+                        boundaries,words=combine_verified_boundaries(chunk_scenes,cached_candidates,duration)
+                        q.put(('log','success',f'Chunk {number}/{len(chunks)}: complementary verified word anchors recovered from saved model timings. No new transcription or voice generation.'))
+                    except RuntimeError as combined_error:
+                        raise RuntimeError(f'Continuous narration chunk {number}/{len(chunks)}, scenes {indices[0]+1}-{indices[-1]+1}: boundary matching failed after available alignment models. Saved audio retained; no guessed scene durations. '+str(initial)) from initial
             sample_bounds = [round(t*rate) for t in boundaries]; sample_bounds[-1] = frames
             with wave.open(str(pcm), 'rb') as source:
                 for j, index in enumerate(indices):
