@@ -1,0 +1,17 @@
+"""Images-only ChatGPT planning using the existing AI Studio ready-story schema."""
+def master_prompt():
+    from ai_studio_cast import MASTER_PROMPT
+    from ai_studio_animate_prompts import SOURCE_QUALITY,POSTING_PACKAGE
+    schema_prompt=MASTER_PROMPT.replace('Read the ENTIRE supplied script and return ONLY JSON in the schema below.',
+        'Read the ENTIRE supplied script and create ready_story.json using exactly the schema below.')
+    return SOURCE_QUALITY+'''You are planning an AI STUDIO IMAGES-ONLY narrated video. No animated clips, no video-model requests, no eight-second video windows, no shots array and no Animate animation options.
+I will give you my complete script and the selected visual preset. Return FIVE separate downloadable files: ready_story.json, narration.txt, validation_and_duration.txt, thumbnail_prompts.json and video_metadata.json (complete SEO package: best title, alternative titles, ready-to-post description, tags and hashtags). JSON files must be independently valid. narration.txt contains the unchanged narration only, with no title mixed into the spoken text. validation_and_duration.txt reports word count, estimated duration at 145/160/170 wpm, scene count, verbatim concatenation check, reference validation and repeated long-passage audit. Never claim estimates are recorded durations. Do not pad to reach 25 minutes or any minimum length.
+The main ready_story.json must contain version:1, title, script, assets and scenes. It is imported through AI Studio → Import Ready Story / JSON. Do not return video_clips.json or image_scenes.json for this workflow.
+Split narration into natural, consecutive single-image beats, usually about 2–6 seconds and mostly 4 seconds of speech. Roughly 5–12 spoken words can guide short beats, but preserve complete clauses where practical. These are estimates only: actual durations come from local voice generation/alignment. Preserve every original word, punctuation and order; never pad a story to reach a target duration or image count.
+Each visual_prompt must describe ONE instantaneous illustration of that scene's own narration, interpreted in full-topic context. Words such as safe, risk, connection or control must remain in the actual subject domain; never substitute road safety, unrelated symbols or other keyword metaphors. Do not advance to a later discovery or show a future rescued character before the narration reaches that event.
+Read the complete script to identify all recurring characters, locations and meaningful recurring props. Assign immutable designs and stable identifiers. Off-screen narration never forces a visible narrator. Use assets:[] and references:[] where no recurring identity is needed, especially documentary diagrams/objects. Show people only when the current subject needs them.
+On-screen characters remain silent. No generated voice, lip-sync, music, subtitles, speech bubbles, embedded text or collage in scene illustrations. Local narration and selected captions are added by the app.
+Follow the complete selected visual preset, period, region, clothing, architecture and aspect ratio. Default 16:9 landscape unless the supplied settings explicitly choose another ratio.
+Before output, verify that joining all scene narration reproduces script exactly, that every scene has a nonempty topic-specific visual_prompt, that every reference names a declared asset, and that no repeated filler or omitted passages were introduced.
+
+'''+schema_prompt+POSTING_PACKAGE

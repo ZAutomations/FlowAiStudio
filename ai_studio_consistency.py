@@ -112,7 +112,9 @@ def upload_reference_library(adapter,config,log):
         # Keep the verified browser connection alive through the Node upload.
         # Use the actual session port, never a second independently defaulted port.
         with browser._session(headless=False) as ctx:
-            browser._batch_page(ctx)
+            page=browser._batch_page(ctx)
+            from ai_studio_reference_cleanup import clean_generated_references
+            clean_generated_references(page,config,adapter._zb_cancel,log)
             log(f'Uploading/reusing all {len(config["references"])} reference images on {browser.browser_label} port {browser.cdp_port}…')
             prepare_agent_prompt({**config,'_upload_references_only':True,'_agent_cdp_port':browser.cdp_port},
                                  prompt,config['references'],adapter._zb_cancel,log)

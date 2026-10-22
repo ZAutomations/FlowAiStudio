@@ -21,6 +21,33 @@ class MissingAgentOutputs(RuntimeError):
     pass
 
 
+def scene_tracking_tokens(text):
+    """Only exact labels count; invented _1/_2 variants are other identities."""
+    import re
+    return set(re.findall(r'(?<![A-Za-z0-9_])AS_SCENE_[a-f0-9]+(?![A-Za-z0-9_])',text or ''))
+
+
+def agent_label_conflicts(reply,records):
+    """An Agent audit cannot rename an unrelated asset to a requested scene."""
+    import re
+    wanted={r['index']+1:r['token'] for r in records if r['status']!='complete'}
+    pairs=re.findall(r'\bOUTPUT\s+(\d+)\s*[/|—–:]\s*(AS_SCENE_[A-Za-z0-9_]+)',reply or '',re.I)
+    return sorted({int(number) for number,token in pairs if int(number) in wanted and token!=wanted[int(number)]})
+
+
+def label_conflict_message(conflicts):
+    return ('Flow Agent used incorrect tracking labels for scene(s) '+', '.join(map(str,conflicts))+
+            '. Its claimed outputs do not match the submitted scene identities. Saved images are retained; no unrelated image was renamed and no automatic regeneration was submitted. Retry with the exact identity table or review the affected outputs.')
+
+
+def wrong_batch_reply(reply,records):
+    """An explicit response naming only other OUTPUT numbers is not this batch."""
+    import re
+    numbers={int(n) for n in re.findall(r'\bOUTPUT\s+(\d+)\b',reply,re.I)}
+    expected={r['index']+1 for r in records}
+    return bool(numbers) and numbers.isdisjoint(expected)
+
+
 def wait_agent_ready(page,cancel,log,timeout=60):
     predicate=(Path(__file__).parent/"animate_flow_backend"/"agent_submit_ready.js").read_text("utf-8").split("if (typeof module")[0]+"\nagentSubmitReady"
     predicate="() => {"+predicate.replace("\nagentSubmitReady","\nreturn agentSubmitReady();")+"}"
@@ -40,6 +67,17 @@ def wait_agent_ready(page,cancel,log,timeout=60):
 
 def update_batch_progress(state):
     by_token={r['token']:r for r in state['records']}
+    # Per-kind watermarks never jump across a missing scene. Batch size changes
+    # do not invalidate the individual downloaded receipts.
+    state['scene_progress']={}
+    for kind in ('image','video'):
+        rows=sorted((r for r in state['records'] if r['kind']==kind),key=lambda r:r['index'])
+        through=0
+        for row in rows:
+            if row.get('status')!='complete':break
+            through=row['index']+1
+        state['scene_progress'][kind]={'downloaded_through':through,
+            'completed_scene_numbers':[r['index']+1 for r in rows if r.get('status')=='complete']}
     for batch in state.get('batch_progress',{}).values():
         rows=[by_token[t] for t in batch['tokens'] if t in by_token]
         batch['generated_successfully']=bool(rows) and len(rows)==len(batch['tokens']) and all(
@@ -87,17 +125,27 @@ def media_plan(scenes, config):
     return records
 
 
+RETRY_SAFE_BATCH_INSTRUCTIONS = """MANDATORY EXISTING-OUTPUT CHECK BEFORE ANY GENERATION, INCLUDING RETRY AND MODEL FALLBACK:
+Inspect this project's existing gallery, saved generation prompts and current generation activity for EACH requested exact AS_SCENE tracking label and OUTPUT number. Check only the requested identities; do not confuse earlier story batches, reference images or similar-looking pictures with these scenes.
+If a completed matching output already exists, reuse it and do NOT generate another copy, variant, upscale-as-new-scene or replacement. Report: 'Already generated: OUTPUT <number> / <exact label>. I will not regenerate it; reuse the existing asset.' Include the existing asset identity when available.
+If ALL requested outputs already exist, submit ZERO generation requests. Confirm the batch already exists and list the existing identities so the downloader can collect them.
+If only PART of the batch exists, list existing versus confirmed missing scene labels first. Generate ONLY the confirmed missing identities, exactly ONE image per missing scene (x1). Retain each original scene number, exact tracking label, assigned references and settings; never renumber the missing subset or recreate the full batch.
+A queued, processing or still-generating matching request is NOT missing: wait for it; do not submit a duplicate. If identity/existence cannot be verified, report 'Uncertain — existing output could not be verified' and do not regenerate that scene on a guess. A failed download, stale gallery, quota warning or inability to see an earlier tile does not prove the image was never generated.
+Finish with an audit listing existing/reused, newly generated, pending and uncertain OUTPUT numbers with their exact tracking labels. Never claim the whole batch is complete while any requested identity is unresolved. These rules override any older instruction to generate the entire batch again.
+"""
+
+
 def batch_prompt(records,config):
     from ai_studio_story import is_narration_story, narration_direction
     from ai_studio_visual_context import TOPIC_DIRECTION,MEANING_DIRECTION
-    lines=['Create exactly the numbered media outputs below. One separate asset per scene; no combined film, collage or storyboard.',
+    lines=['Reconcile the numbered media outputs below, reusing existing outputs and generating only confirmed missing identities. One separate asset per scene; no combined film, collage or storyboard.',
            'IMAGES: exactly ONE image per scene (x1 / number_of_images=1), never 2x, x2, x3 or x4. Override any default requesting multiple variations. No alternate versions or quality-selection variants. A batch of N scenes means N total images. Once one image for a scene exists, it is complete; do not request a second variation, including during model fallback.',
            ('Use the attached named character AND location reference image pixels in EVERY output. Preserve the same faces, clothing, colors and visual style.' if config.get('references') else 'No reference images attached. Follow each scene subject and the selected visual style; do not invent a recurring named cast or force a fixed story location.'),
            'Output aspect ratio: '+config.get('aspect','16:9')+'. '+('All images MUST be 16:9 landscape, width greater than height. Never generate portrait, vertical or square images; keep this ratio through every model fallback.' if config.get('aspect','16:9')=='16:9' else 'This aspect ratio was explicitly selected. Keep it through every model fallback.'),
            ('Permanent reference names: '+', '.join(Path(p).stem for p in config.get('references',[]))+'. Character/location bible: '+json.dumps(config.get('reference_descriptions',{}),ensure_ascii=False)+'. Keep story roles mapped to these same named assets.' if config.get('references') else 'Choose subjects, objects, environments and explanatory visual actions from the scene prompts. Do not introduce CharacterA, CharacterB or StoryPlace.'),
            ('All listed scene outputs must be VIDEO clips. Use '+config['animate_model']+'.' if all(r['kind']=='video' for r in records)
             else 'For images use Nano Banana. For videos use '+config['animate_model']+'.'),
-           'Videos: silent characters, no dialogue, narration, music or captions. Add subtle natural character action and camera movement. Duration exactly '+str(clip_seconds(config))+' seconds. '+'Each VIDEO output is one edited clip containing 2–3 distinct shots with visible hard cuts timed to its narration. Follow its edit decision list below. Do not create separate outputs per shot or a simultaneous collage/storyboard.',
+           'Videos: silent characters, no dialogue, narration, music or captions. Add subtle natural character action and camera movement. Duration exactly '+str(clip_seconds(config))+' seconds. '+'Each VIDEO output is one edited clip containing TWO distinct shots by default, THREE only when the narration genuinely needs a third visual beat, never four, with visible hard cuts timed to its narration. Follow its edit decision list below. Do not create separate outputs per shot or a simultaneous collage/storyboard.',
            'IMPORTANT: Begin each individual media generation prompt with its exact AS_SCENE tracking reference, verbatim as plain prompt text. Keep it in the saved generation prompt, not only in your chat reply or tool metadata. It is a tracking label; do not display or speak it in the media. Never omit, shorten or replace the tracking reference.',
            'Generate only this batch. Do not regenerate earlier scenes.']
     if any(r['kind']=='video' for r in records):
@@ -110,6 +158,7 @@ def batch_prompt(records,config):
         lines[2]='Attach only the references assigned to each scene. Never force the entire batch cast into one image.'
         lines[5]='ALL outputs must be still IMAGES using '+preferred(config)+'. Never create video clips, animation, music or audio.\n'+batch_instructions(config)
         lines[6]='Preserve reference identity only where that character or place occurs in the scene. Never force every attached character into every image. Preserve faces, age, hair, clothing, architecture and period details; do not substitute a similar-looking person.'
+    lines.append(RETRY_SAFE_BATCH_INSTRUCTIONS)
     if config.get('cinematic_previous_frame'):
         lines.append('CONTINUATION FRAME @'+config['cinematic_previous_frame']+': this is the actual final frame of the previous clip. Start from its pose, camera geography, lighting, clothing and props, then progress the narrated action. Do not hold this image for the entire clip. Character references define identity; this frame defines the starting composition.')
     lines.append('Full video context, for interpreting the visuals only; DO NOT speak it: '+json.dumps(
@@ -130,6 +179,7 @@ def batch_prompt(records,config):
             lines.append('Do not show other recurring characters or locations from the full story in this scene. Background extras only when required by this scene action.')
     from ai_studio_continuity_ledger import prompt_context
     lines.append(prompt_context(records,config))
+    lines.insert(0,'CURRENT REQUEST ONLY: reconcile these OUTPUT numbers, reusing those already generated and generating ONLY confirmed missing identities: '+', '.join(str(r['index']+1).zfill(4) for r in records)+'. Ignore previous batches and earlier scene numbers in this conversation. Copy each exact AS_SCENE tracking label to its corresponding asset. Do not reuse an earlier batch as this response.\nEXACT IDENTITY TABLE (authoritative; verify every existing asset against this table):\n'+'\n'.join(f"OUTPUT {r['index']+1:04d} = {r['token']}" for r in records)+'\nA matching OUTPUT number alone is NOT a match. The saved asset prompt must contain the exact corresponding label AND depict this scene. Never recycle earlier labels or append _1/_2 suffixes, invent labels, or relabel unrelated images. Reference-image IDs and reference filenames are NOT scene tracking labels; never derive AS_SCENE labels from attached character/location asset IDs. If the exact identity does not exist, report it as missing or uncertain; never claim it already exists using a different label.')
     return '\n\n'.join(lines)
 
 
@@ -316,6 +366,7 @@ class AgentMedia(ZBotImageGenerator):
     def collect(self,records,save,on_media,timeout=1200):
         self.completed_reported_quotas=()
         reference_ids=set() if getattr(self,'reference_collection',False) else self._reference_asset_ids(records)
+        completed_ids=getattr(self,'completed_scene_asset_ids',set())
         self._flow_reference_filenames=set() if getattr(self,'reference_collection',False) else self._reference_filenames(records)
         with self._session(headless=False) as ctx:
             page=self._batch_page(ctx);page.set_default_timeout(4000)
@@ -328,10 +379,10 @@ class AgentMedia(ZBotImageGenerator):
                 from ai_studio_flow_inventory import read_project_images
                 indexed=read_project_images(page,self.cancel,self._log)
                 for asset in indexed:self._flow_asset_prompts[asset['asset_id']]=asset['prompt']
-            indexed_tokens={token for asset in indexed for token in __import__('re').findall(r'AS_SCENE_[a-f0-9]+',asset['prompt'])}
+            indexed_tokens={token for asset in indexed for token in scene_tracking_tokens(asset['prompt'])}
             self._scene_grid_position(page,0)
             started=time.monotonic();deadline=started+timeout;last_log=0;observed={};unread_attempts={}
-            stable_since=started;last_signature=None;sweeps=0;download_passes=0;settled=False;ambiguous_idle=False;download_notice_logged=False
+            stable_since=started;last_signature=None;sweeps=0;download_passes=0;idle_grid_passes=0;settled=False;ambiguous_idle=False;download_notice_logged=False
             while any(r['status']!='complete' for r in records):
                 check_cancel(self.cancel)
                 anchor=self._scene_grid_position(page)
@@ -340,7 +391,7 @@ class AgentMedia(ZBotImageGenerator):
                 # Download verified index hits immediately; opening reference
                 # popups first adds delay without contributing scene matches.
                 grid=[] if index_covers_pending else self._agent_assets(page)
-                assets=list({a['asset_id']:a for a in [*grid,*indexed]}.values())
+                assets=[a for a in {a['asset_id']:a for a in [*grid,*indexed]}.values() if a['asset_id'] not in completed_ids]
                 for a in assets:
                     observed.setdefault(a['asset_id'],{}).update({k:a.get(k) for k in ('asset_id','kind','busy','failed')})
                 signature=tuple(sorted((a['asset_id'],a['busy'],a['failed']) for a in observed.values()))
@@ -362,16 +413,14 @@ class AgentMedia(ZBotImageGenerator):
                         if text.startswith('FLOW_REFERENCE:') and text.removeprefix('FLOW_REFERENCE:').casefold() in self._flow_reference_filenames:
                             reference_ids.add(a['asset_id']);observed[a['asset_id']]['reference']=True
                             continue
-                        observed[a['asset_id']]['tracking_tokens']=__import__('re').findall(r'AS_SCENE_[a-f0-9]+',text)
+                        observed[a['asset_id']]['tracking_tokens']=sorted(scene_tracking_tokens(text))
                         if len(set(observed[a['asset_id']]['tracking_tokens']))!=1:
                             continue # a copied whole-batch prompt cannot identify one scene
-                        exact=[r for r in pending if r['token'] in text]
+                        exact=[r for r in pending if r['token'] in scene_tracking_tokens(text)]
                     if len(exact)!=1:continue
                     r=exact[0]
                     if r['token'] in hits and hits[r['token']]['asset_id']!=a['asset_id']:
                         previous=hits[r['token']]
-                        if r['kind']!='image':
-                            raise RuntimeError('More than one asset matches '+r['token']+'. Select the intended clip manually; no scene order guessed.')
                         ids=alternatives.setdefault(r['token'],set())
                         ids.update((previous['asset_id'],a['asset_id']))
                         # Both outputs have the exact SAME scene identity. Keep
@@ -387,7 +436,7 @@ class AgentMedia(ZBotImageGenerator):
                     if r['token'] in alternatives:
                         r['alternate_asset_ids']=sorted((set(r.get('alternate_asset_ids',[]))|alternatives[r['token']])-{a['asset_id']})
                         r['asset_selection']='saved identity, otherwise stable asset ID order'
-                        self._log(f"Scene {r['index']+1}: multiple outputs share its exact tracking label. Saving one image; alternate asset identities retained in the checkpoint.")
+                        self._log(f"Scene {r['index']+1}: multiple outputs share its exact tracking label. Saving one {r['kind']}; alternate asset identities retained in the checkpoint.")
                     r['asset_id']=a['asset_id'];r['status']='matched';save()
                     if not a['src'] and r['kind']!='video':continue # video downloads use the exact tile menu, not playback URLs
                     if r['kind']=='video':
@@ -401,9 +450,12 @@ class AgentMedia(ZBotImageGenerator):
                         self.completed_reported_quotas=quota_models(self._agent_batch_reply(page,records))
                     break
                 if getattr(self,'available_only',False) and ((download_passes if anchor else sweeps)>=2 or (not assets and time.monotonic()-started>=6)):
+                    conflicts=agent_label_conflicts(self._agent_batch_reply(page,records),records)
+                    self.collection_label_conflicts=conflicts
+                    if conflicts:self._log('Flow Agent reported different tracking labels for requested scenes: '+', '.join(map(str,conflicts))+'. These are not verified matches; unrelated outputs were not renamed or counted as downloaded.','warning')
                     report=Path(records[0]['output']).parent.parent/'scene_download_diagnostics.json'
                     atomic_json(report,{'missing_scenes':[r['index']+1 for r in records if r['status']!='complete'],
-                        'observed_assets':list(observed.values()),'completed_passes':download_passes if anchor else sweeps})
+                        'observed_assets':list(observed.values()),'completed_passes':download_passes if anchor else sweeps,'agent_label_conflicts':conflicts})
                     self._log('Available scene image scan complete. Unmatched scenes remain pending; this does not prove they were never generated. Diagnostics: '+str(report))
                     break
                 if settled or ambiguous_idle or time.monotonic()>=deadline or time.monotonic()-started>=3600:
@@ -411,7 +463,7 @@ class AgentMedia(ZBotImageGenerator):
                     report=Path(records[0]['output']).parent.parent/'agent_collection_diagnostics.json'
                     atomic_json(report,{'missing_scenes':[r['index']+1 for r in records if r['status']!='complete'],
                         'records':[{k:r.get(k) for k in ('index','token','status','asset_id')} for r in records],
-                        'observed_assets':list(observed.values())})
+                        'observed_assets':list(observed.values()),'agent_label_conflicts':agent_label_conflicts(self._agent_batch_reply(page,records),records)})
                     unlabelled=sum(a['asset_id'] not in reference_ids and not a.get('tracking_tokens') and not a.get('busy') and not a.get('failed') for a in observed.values())
                     retry_unmatched=(ambiguous_idle and getattr(self,'retry_unmatched_images',False)
                         and all(r['kind']=='image' for r in records))
@@ -419,6 +471,12 @@ class AgentMedia(ZBotImageGenerator):
                     hint=' Flow is idle and the grid scan found no matching outputs. Use Generate Missing to request these scenes only.' if settled else ' Retry collects existing outputs only; no batch resubmitted.'
                     raise error(f'Agent batch paused. Unresolved scenes: {missing}; {len(observed)} assets observed, {unlabelled} media assets without readable tracking labels. Saved outputs retained.'+hint+f' Diagnostics: {report}')
                 refusal='' if getattr(self,'available_only',False) else self._agent_refusal(page,records)
+                if not getattr(self,'available_only',False):
+                    conflicts=agent_label_conflicts(self._agent_batch_reply(page,records),records)
+                    if conflicts and not any(a.get('busy') for a in assets):
+                        # A foreign label is not missing-media evidence. Do not
+                        # spend more quota automatically recreating the batch.
+                        raise RuntimeError(label_conflict_message(conflicts))
                 if refusal:
                     missing=', '.join(str(r['index']+1) for r in records if r['status']!='complete')
                     for r in records:
@@ -479,7 +537,8 @@ class AgentMedia(ZBotImageGenerator):
                     return {x:Math.max(10,Math.min(innerWidth-10,r.x+r.width/2)),y:Math.max(180,Math.min(innerHeight-100,r.y+r.height/2)),delta:top+client>=height-5?-height:client*.7,at_end:top+client>=height-5,agent_busy:busy,failed,unidentified};
                 }''')
                 if point:
-                    if point.get('at_end'):sweeps+=1
+                    if point.get('at_end'):
+                        sweeps+=1;idle_grid_passes+=1
                     settled=(sweeps>=2 and time.monotonic()-stable_since>=90
                         and not point.get('agent_busy') and not point.get('failed') and not point.get('unidentified')
                         and all(not a.get('busy') and not a.get('failed')
@@ -499,6 +558,17 @@ class AgentMedia(ZBotImageGenerator):
                         and all(a.get('failed') or a['asset_id'] in reference_ids or a.get('tracking_tokens')
                                 or any(r.get('asset_id')==a['asset_id'] for r in records) for a in observed.values())):
                         raise ModelQuotaExhausted(model_quota,reported_quotas)
+                    completed_passes=download_passes if anchor else idle_grid_passes
+                    if (completed_passes>=2 and time.monotonic()-started>=90
+                        and not point.get('agent_busy') and not any(a.get('busy') for a in assets)
+                        and not any(r['status']=='matched' for r in records)):
+                        # Virtualized tiles may remount with new DOM IDs forever.
+                        # They cannot extend a completed idle scan indefinitely.
+                        reply=self._agent_batch_reply(page,records)
+                        if not any(r['status']=='complete' for r in records) and wrong_batch_reply(reply,records):
+                            raise MissingAgentOutputs('Flow Agent answered with earlier OUTPUT numbers instead of the current batch. Existing media retained; only the unresolved current scenes may be retried.')
+                        if not point.get('failed') and not settled:
+                            ambiguous_idle=True
                     if anchor:
                         # Opening prompt popovers can scroll the grid. Advance
                         # from the PRE-READ position, not the shifted viewport.
@@ -755,10 +825,11 @@ def generate_agent_media(scenes,config,cancel,log,on_media,reference_records=Non
             recovered.add(start);save()
             log(f'Model fallback: {error.model} → {next_model}. Same account, project and references; only unresolved scenes will be submitted.')
             return True
-        except MissingAgentOutputs:
+        except MissingAgentOutputs as error:
             # The collector proves a stable, idle, fully labelled grid first.
             # Normal Build/Retry should continue a confirmed absent batch too.
             if not config.get('_generate_missing',True) or start in recovered:raise
+            log(str(error))
             recovered.add(start)
             missing=[r for r in target if r['status']!='complete']
             for r in missing:r['status']='pending'
@@ -780,6 +851,17 @@ def generate_agent_media(scenes,config,cancel,log,on_media,reference_records=Non
         elif r['status']=='complete':r['status']='submitted'
     if reused:log(f'Reused {reused} verified local scene outputs; no new download or generation for those scenes.')
     save()
+    generator.completed_scene_asset_ids={asset_id for r in records if r['status']=='complete'
+        for asset_id in [r.get('asset_id'),*r.get('alternate_asset_ids',[])] if asset_id}
+    # Exclude completed IDs before every subsequent batch, not just on restart.
+    original_on_media=on_media
+    def on_media(record):
+        if record.get('asset_id'):generator.completed_scene_asset_ids.add(record['asset_id'])
+        generator.completed_scene_asset_ids.update(record.get('alternate_asset_ids',[]))
+        original_on_media(record)
+    if generator.completed_scene_asset_ids:
+        marks=state.get('scene_progress',{})
+        log('Download checkpoint: '+', '.join(f"{kind} scenes downloaded through {value['downloaded_through']}" for kind,value in marks.items() if value['downloaded_through'])+'. Completed scene assets and their saved variants will not have their prompts reopened.')
     from ai_studio_cinematic import enabled as cinematic_enabled
     video_size=max(1,int(config.get('animate_video_batch_size',5)))
     size=max(1,int(config.get("image_batch_size",6)))
@@ -845,8 +927,8 @@ def generate_agent_media(scenes,config,cancel,log,on_media,reference_records=Non
                 log('Downloaded the next batch in scene order. Generate the next text file, then click Download Generated Batch again. Build All reuses saved images.')
                 return records
             continue
-        if start not in recovered and any(possibly_sent(r) and r['status']=='pending' for r in missing):
-            log('Retry verification: this batch was prepared previously and may have been submitted manually. Checking Flow outputs before any new submission.')
+        if start not in recovered and any(possibly_sent(r) and (image_batch or r['status']=='pending') for r in missing):
+            log('Retry verification: this image batch was prepared or submitted previously. Downloading verified existing outputs before any new submission; only unresolved scenes can be requested again.')
             if collect_or_recover(missing,start,verify_existing=True):
                 return generate_agent_media(scenes,{**config,'_recovered_batches':list(recovered)},cancel,log,on_media,reference_records=reference_records)
             log('Previously generated batch recovered and saved; no prompts resubmitted.')

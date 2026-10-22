@@ -56,6 +56,7 @@ def download_all(adapter,q,config):
         q.put(('refresh',))
     save()
     q.put(('log','info',f'Skipping {skipped} valid saved scene images. Scanning for {len(pending)} missing scene images; character/location references excluded.'))
+    conflicts=[]
     if pending:
         generator=AgentMedia('flow',mode='cdp',flow_project_url=config['flow_url'],
             share_google_profile=config.get('share_google_profile',True),cancel=adapter._zb_cancel,
@@ -64,13 +65,14 @@ def download_all(adapter,q,config):
         for r in records:
             if r.get('asset_id') and r.get('token'):generator._flow_asset_prompts[r['asset_id']]=r['token']
         generator.collect(pending,save,media,timeout=300)
+        conflicts=getattr(generator,'collection_label_conflicts',[])
     downloaded=sum(r['status']=='complete' for r in pending)
     q.put(('log','success',f'Downloaded {downloaded} new scene images; skipped {skipped} saved images; {len(pending)-downloaded} not matched in this scan. Files saved by scene number.'))
     highest=max((r['index']+1 for r in images if r['status']=='complete'),default=0)
     gaps=[r['index']+1 for r in images if r['index']<highest and r['status']!='complete']
     if gaps:q.put(('log','warning',f'Unmatched gaps through scene {highest}: '+', '.join(map(str,gaps))+'. Duplicate variants and references do not count as additional scenes.'))
     return {'downloaded':downloaded,'saved':skipped+downloaded,'unmatched':len(pending)-downloaded,
-        'highest_saved_scene':highest,'gaps':gaps}
+        'highest_saved_scene':highest,'gaps':gaps,'agent_label_conflicts':conflicts}
 
 
 def export_files(state, config, log, index_name='manual_batch_export.json'):

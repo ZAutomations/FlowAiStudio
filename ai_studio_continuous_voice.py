@@ -165,7 +165,11 @@ def generate(adapter, q, config, tts, recognize=transcribe):
     styled = dict(styled, tts_engine=config['voice_engine'], use_tts_voiceover=True)
     keys = {k:v for k,v in styled.items() if k.startswith(('tts_', 'gemini_tts_', 'kokoro_', 'piper_', 'cloud_tts_')) or k == 'use_cloud_tts'}
     identity = fingerprint('continuous-v1', [s['narration'] for s in scenes], config['voice_engine'], keys)
-    root = root / identity[:16]; root.mkdir(parents=True, exist_ok=True)
+    root = root / identity[:16]
+    if not root.exists():
+        from ai_studio_narration_quality import validate_narration
+        validate_narration(' '.join(scene['narration'] for scene in scenes))
+    root.mkdir(parents=True, exist_ok=True)
     q.put(('log', 'info', 'Continuous Narration: one voice request at a time; the next chunk synthesizes while the current chunk aligns. Saved audio/timing reused.'))
     chunks = groups(scenes); assignments = []; pieces = []
     def synthesize(number):

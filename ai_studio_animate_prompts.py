@@ -2,7 +2,9 @@
 import json,re
 from ai_studio_animate_options import animation_count
 
-SCHEMA='''{"version":1,"title":"Story title","script":"FULL ORIGINAL NARRATION VERBATIM","animation":{"animation_mode":"partial","partial_animation_unit":"seconds","animate_seconds":80,"animate_count":10,"animate_clip_seconds":8,"animate_multishot":true},"scenes":[{"scene":1,"narration":"Exact consecutive passage from the script","visual_prompt":"Detailed scene-specific visual action and composition","media_type":"video","shots":[{"start":0,"end":3,"visual_prompt":"First narrated visual action"},{"start":3,"end":6,"visual_prompt":"Connected second action"},{"start":6,"end":8,"visual_prompt":"Reaction or detail concluding this clip"}]}]}'''
+SCHEMA='{"version":1,"title":"Story title","script":"FULL ORIGINAL NARRATION VERBATIM","animation":{"animation_mode":"partial","partial_animation_unit":"seconds","animate_seconds":80,"animate_count":10,"animate_clip_seconds":8,"animate_multishot":true},"scenes":[{"scene":1,"narration":"Exact consecutive passage from the script","visual_prompt":"Detailed scene-specific visual action and composition","media_type":"video","shots":[{"start":0,"end":4,"visual_prompt":"Opening narrated action and setting"},{"start":4,"end":8,"visual_prompt":"HARD CUT to the connected narrated action or reaction, preserving continuity"}]}]}'
+
+SOURCE_QUALITY = 'SOURCE QUALITY CHECK BEFORE JSON: Do not pad the story, repeat investigation paragraphs, reuse narration to lengthen it, or copy earlier scenes into later rows. Audit repeated long sentences and paragraphs in the supplied narration. If repeated filler already exists in the input, report the repeated passages and ask for a corrected/approved script BEFORE producing story JSON; never silently rewrite the locked narration. Each visual must depict only the event established by its own narration passage, not earlier/later story events. Do not reveal later discoveries early.\n\n'
 
 POSTING_PACKAGE = r"""
 ADDITIONAL SEPARATE DELIVERABLE FILES (required, alongside the story JSON):
@@ -25,7 +27,7 @@ def master_prompt(mode='partial'):
       'If I specify a number of opening scenes instead, set partial_animation_unit scenes and animate_count to that number. '
       'Mark the estimated opening narration span as video and the remainder as image. Never assume 80 seconds means 80 scenes. '
       'The app uses actual locally generated narration durations to make the final video/still decision, so estimates are planning guidance only.')
-    return '''You are the visual scene planner for Flow AI Studio Animate. Read the FULL narration before planning any scene.
+    return SOURCE_QUALITY+'''You are the visual scene planner for Flow AI Studio Animate. Read the FULL narration before planning any scene.
 
 I will provide a title, original narration, visual preset, context/culture/period, and optional recurring character/location references.
 In animation set animate_clip_seconds to 8 and animate_multishot to true. Return the story as one complete valid JSON file named ready_story.json, plus the two additional deliverable files specified below. No explanations, ellipses or omitted scenes inside JSON.
@@ -35,12 +37,12 @@ NARRATION IS LOCKED: preserve every word and punctuation in its original languag
 MEDIA PLAN:
 '''+selection+'''
 If CURRENT APP SELECTION has animate_narration_mode cinematic, return semantic source beats with unchanged narration. The app generates continuous voice, regroups VIDEO beats against measured eight-second windows while retaining narration-based IMAGE beat boundaries, and writes the final continuity storyboard. Imported shot times are guidance only in that mode. Do not claim they are measured audio timings.
-For VIDEO ROWS ONLY: split at natural sentence/clause boundaries into short scenes suitable for eight-second generated clips, usually about 16–20 spoken words; use shorter scenes when needed for Urdu/Hindi or slow expressive delivery. These are estimates, not a substitute for measuring TTS. Do not pad, remove or rewrite narration to meet timing. Each video row is ONE generated 8-second clip, containing 2–3 distinct connected sequential shots. A shot is not a separate media request. Provide shots with contiguous local start/end seconds covering exactly 0–8 seconds, and a specific visual_prompt for each shot. Use narration meaning to choose the shot count and cuts; do not force one image/shot per sentence. Show the shots sequentially inside the clip, never as a simultaneous collage or storyboard. The editor fits the clip to actual narration. Still-image rows remain ordinary narration-based images and need no shots array.
+For VIDEO ROWS ONLY: split at natural sentence/clause boundaries into short scenes suitable for eight-second generated clips, usually about 16–20 spoken words; use shorter scenes when needed for Urdu/Hindi or slow expressive delivery. These are estimates, not a substitute for measuring TTS. Do not pad, remove or rewrite narration to meet timing. Each video row is ONE generated 8-second clip, containing TWO distinct connected sequential shots by default; use THREE only when a third narration-driven visual beat is genuinely necessary, never four or more. A shot is not a separate media request. Provide shots with contiguous local start/end seconds covering exactly 0–8 seconds, and a specific visual_prompt for each shot. Use narration meaning to choose the shot count and cuts; do not force one image/shot per sentence. Show the shots sequentially inside the clip, never as a simultaneous collage or storyboard. The editor fits the clip to actual narration. Still-image rows remain ordinary narration-based images and need no shots array.
 
 VISUAL DIRECTION:
 Honor the selected visual preset consistently. Read each passage in full-story context: show the actual people, objects, place, events and meaning; never illustrate isolated keywords with unrelated metaphors. Do not add events, clues, suspects or conclusions absent from the script. Keep recurring faces, age, hair, fixed clothing and location layout consistent with the supplied reference names. Include only the people/places actually needed in that scene. Documentary passages may use topic-specific illustrations, objects or diagrams without invented recurring characters.
 
-VIDEO PROMPTS: Mandatory visible hard cuts: default shots 0-3s, 3-6s, 6-8s; alternatively two shots 0-4s and 4-8s when the narration has two visual beats. Each shot visual_prompt MUST state the shot size/angle, its own narration-driven action, and the continuity to the preceding shot. Repeating one action with only a pan or zoom is not multiple shots. Do not write one continuous-shot prompt. Describe clear subject action, facial/body reactions, setting, framing and restrained camera movement. Characters remain silent with naturally closed mouths: no talking, lip-sync, singing or narration to camera. The narrator is added locally. No generated speech, voice-over, music, sound effects, subtitles, speech bubbles, logos or embedded text.
+VIDEO PROMPTS: Mandatory visible hard cuts: default TWO shots 0-4s and 4-8s. Only when narration genuinely needs a third distinct visual beat, use THREE shots with natural timings covering 0-8s. Never use four or more shots. Each shot visual_prompt MUST state the shot size/angle, its own narration-driven action, and the continuity to the preceding shot. Repeating one action with only a pan or zoom is not multiple shots. Do not write one continuous-shot prompt. Describe clear subject action, facial/body reactions, setting, framing and restrained camera movement. Characters remain silent with naturally closed mouths: no talking, lip-sync, singing or narration to camera. The narrator is added locally. No generated speech, voice-over, music, sound effects, subtitles, speech bubbles, logos or embedded text.
 STILL-IMAGE TIMING IS DIFFERENT FROM VIDEO TIMING: eight seconds applies ONLY to video clips. Split the remaining narration into natural semantic image beats aiming for about 4 seconds each, usually 2-6 seconds depending on delivery and meaning. Estimate roughly 5-12 spoken words per image as a flexible guide, not a quota; prefer one complete short clause/idea. Break long sentences at meaningful clause boundaries; do not group several ideas to fill an eight-second image slot. Each image visual_prompt must depict precisely that row's narration in full-story context. Preserve every word in order; never shorten, pad or rewrite narration to force a duration. Do not split a word. Actual display duration is measured from generated narration, not fixed by this estimate. Still images require ONE image per narration beat, no shots array or video cuts.
 
 IMAGE PROMPTS: describe one polished still with the same visual style, topic accuracy and reference identities. Do not request a video, collage, storyboard or multiple variants.
@@ -69,6 +71,8 @@ def parse_ready(raw,original=''):
     if not isinstance(data,dict) or data.get('version')!=1:raise ValueError('Animate story JSON must use version 1.')
     rows=data.get('scenes');script=data.get('script');options=data.get('animation',{})
     if not isinstance(rows,list) or not rows or not isinstance(script,str) or not script.strip() or not isinstance(options,dict):raise ValueError('Ready story requires script, animation options and scenes.')
+    from ai_studio_narration_quality import validate_narration
+    validate_narration(script)
     animation_count(options,0);scenes=[]
     for i,row in enumerate(rows,1):
         if not isinstance(row,dict) or type(row.get('scene')) is not int or row['scene']!=i:raise ValueError('Scene numbers must start at 1 and be consecutive.')
@@ -78,7 +82,7 @@ def parse_ready(raw,original=''):
         if shots:
             from ai_studio_animate_options import clip_seconds
             seconds=clip_seconds(options)
-            if not isinstance(shots,list) or not 2<=len(shots)<=4:raise ValueError(f'Clip {i} needs 2–4 sequential shots.')
+            if not isinstance(shots,list) or not 2<=len(shots)<=3:raise ValueError(f'Clip {i} needs 2 shots by default, at most 3 when needed.')
             previous=0
             for shot in shots:
                 if not isinstance(shot,dict) or not isinstance(shot.get('visual_prompt'),str) or not shot['visual_prompt'].strip():raise ValueError('Every shot needs a visual direction.')
@@ -103,14 +107,14 @@ def parse_ready(raw,original=''):
 
 
 def split_master_prompt():
-    return '''Create FOUR separate complete JSON files: video_clips.json, image_scenes.json, thumbnail_prompts.json and video_metadata.json. No Gemini planning will follow.
+    return SOURCE_QUALITY+'''Create FOUR separate complete JSON files: video_clips.json, image_scenes.json, thumbnail_prompts.json and video_metadata.json. No Gemini planning will follow.
 Read the full narration. Preserve every original word, punctuation and order. Never rewrite or summarize narration.
 I specify N opening eight-second video clips (e.g. 10 or 15); remaining narration becomes still-image scenes.
 Use consecutive exact narration passages for each row. Spoken duration is estimated here; the app later measures
 continuous audio and maps VIDEO directions to actual eight-second windows. IMAGE rows keep their own narration-based beat boundaries. Never claim estimates are measured.
 STILL-IMAGE TIMING IS DIFFERENT FROM VIDEO TIMING: eight seconds applies ONLY to video clips. Split the remaining narration into natural semantic image beats aiming for about 4 seconds each, usually 2-6 seconds depending on delivery and meaning. Estimate roughly 5-12 spoken words per image as a flexible guide, not a quota; prefer one complete short clause/idea. Break long sentences at meaningful clause boundaries; do not group several ideas to fill an eight-second image slot. Each image visual_prompt must depict precisely that row's narration in full-story context. Preserve every word in order; never shorten, pad or rewrite narration to force a duration. Do not split a word. Actual display duration is measured from generated narration, not fixed by this estimate. Still images require ONE image per narration beat, no shots array or video cuts.
 
-Use 2-3 distinct sequential shots per video, local start/end covering exactly 0-8. Prefer 0-3, 3-6, 6-8 seconds. Explicitly label HARD CUT at each boundary. A pan/zoom is not a cut. Each shot must state its narration beat, distinct framing/action, and continuity of cast, props and screen direction. Keep characters silent; local narrator speaks.
+Use TWO distinct sequential shots per video by default, 0-4 and 4-8 seconds. Only if the narration genuinely needs another visual beat, use THREE shots with natural local start/end covering exactly 0-8. Never four or more. Explicitly label HARD CUT at each boundary. A pan/zoom is not a cut. Each shot must state its narration beat, distinct framing/action, and continuity of cast, props and screen direction. Keep characters silent; local narrator speaks.
 Keep recurring faces, dress, props, location layout, screen direction, lighting and emotional state consistent.
 Each video has continuity {location,start_state,end_state,continues_previous}; a continuation's start_state must exactly
 equal the preceding end_state and location. New time/place must be explicitly established. Reference names must match
