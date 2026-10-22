@@ -21,6 +21,25 @@ class MissingAgentOutputs(RuntimeError):
     pass
 
 
+def scene_tracking_tokens(text):
+    """Only exact labels count; invented _1/_2 variants are other identities."""
+    import re
+    return set(re.findall(r'(?<![A-Za-z0-9_])AS_SCENE_[a-f0-9]+(?![A-Za-z0-9_])',text or ''))
+
+
+def agent_label_conflicts(reply,records):
+    """An Agent audit cannot rename an unrelated asset to a requested scene."""
+    import re
+    wanted={r['index']+1:r['token'] for r in records if r['status']!='complete'}
+    pairs=re.findall(r'\bOUTPUT\s+(\d+)\s*[/|—–:]\s*(AS_SCENE_[A-Za-z0-9_]+)',reply or '',re.I)
+    return sorted({int(number) for number,token in pairs if int(number) in wanted and token!=wanted[int(number)]})
+
+
+def label_conflict_message(conflicts):
+    return ('Flow Agent used incorrect tracking labels for scene(s) '+', '.join(map(str,conflicts))+
+            '. Its claimed outputs do not match the submitted scene identities. Saved images are retained; no unrelated image was renamed and no automatic regeneration was submitted. Retry with the exact identity table or review the affected outputs.')
+
+
 def wrong_batch_reply(reply,records):
     """An explicit response naming only other OUTPUT numbers is not this batch."""
     import re
@@ -160,7 +179,7 @@ def batch_prompt(records,config):
             lines.append('Do not show other recurring characters or locations from the full story in this scene. Background extras only when required by this scene action.')
     from ai_studio_continuity_ledger import prompt_context
     lines.append(prompt_context(records,config))
-    lines.insert(0,'CURRENT REQUEST ONLY: reconcile these OUTPUT numbers, reusing those already generated and generating ONLY confirmed missing identities: '+', '.join(str(r['index']+1).zfill(4) for r in records)+'. Ignore previous batches and earlier scene numbers in this conversation. Copy each exact AS_SCENE tracking label to its corresponding asset. Do not reuse an earlier batch as this response.')
+    lines.insert(0,'CURRENT REQUEST ONLY: reconcile these OUTPUT numbers, reusing those already generated and generating ONLY confirmed missing identities: '+', '.join(str(r['index']+1).zfill(4) for r in records)+'. Ignore previous batches and earlier scene numbers in this conversation. Copy each exact AS_SCENE tracking label to its corresponding asset. Do not reuse an earlier batch as this response.\nEXACT IDENTITY TABLE (authoritative; verify every existing asset against this table):\n'+'\n'.join(f"OUTPUT {r['index']+1:04d} = {r['token']}" for r in records)+'\nA matching OUTPUT number alone is NOT a match. The saved asset prompt must contain the exact corresponding label AND depict this scene. Never recycle earlier labels or append _1/_2 suffixes, invent labels, or relabel unrelated images. Reference-image IDs and reference filenames are NOT scene tracking labels; never derive AS_SCENE labels from attached character/location asset IDs. If the exact identity does not exist, report it as missing or uncertain; never claim it already exists using a different label.')
     return '\n\n'.join(lines)
 
 
@@ -360,7 +379,7 @@ class AgentMedia(ZBotImageGenerator):
                 from ai_studio_flow_inventory import read_project_images
                 indexed=read_project_images(page,self.cancel,self._log)
                 for asset in indexed:self._flow_asset_prompts[asset['asset_id']]=asset['prompt']
-            indexed_tokens={token for asset in indexed for token in __import__('re').findall(r'AS_SCENE_[a-f0-9]+',asset['prompt'])}
+            indexed_tokens={token for asset in indexed for token in scene_tracking_tokens(asset['prompt'])}
             self._scene_grid_position(page,0)
             started=time.monotonic();deadline=started+timeout;last_log=0;observed={};unread_attempts={}
             stable_since=started;last_signature=None;sweeps=0;download_passes=0;idle_grid_passes=0;settled=False;ambiguous_idle=False;download_notice_logged=False
@@ -394,10 +413,10 @@ class AgentMedia(ZBotImageGenerator):
                         if text.startswith('FLOW_REFERENCE:') and text.removeprefix('FLOW_REFERENCE:').casefold() in self._flow_reference_filenames:
                             reference_ids.add(a['asset_id']);observed[a['asset_id']]['reference']=True
                             continue
-                        observed[a['asset_id']]['tracking_tokens']=__import__('re').findall(r'AS_SCENE_[a-f0-9]+',text)
+                        observed[a['asset_id']]['tracking_tokens']=sorted(scene_tracking_tokens(text))
                         if len(set(observed[a['asset_id']]['tracking_tokens']))!=1:
                             continue # a copied whole-batch prompt cannot identify one scene
-                        exact=[r for r in pending if r['token'] in text]
+                        exact=[r for r in pending if r['token'] in scene_tracking_tokens(text)]
                     if len(exact)!=1:continue
                     r=exact[0]
                     if r['token'] in hits and hits[r['token']]['asset_id']!=a['asset_id']:
@@ -431,9 +450,12 @@ class AgentMedia(ZBotImageGenerator):
                         self.completed_reported_quotas=quota_models(self._agent_batch_reply(page,records))
                     break
                 if getattr(self,'available_only',False) and ((download_passes if anchor else sweeps)>=2 or (not assets and time.monotonic()-started>=6)):
+                    conflicts=agent_label_conflicts(self._agent_batch_reply(page,records),records)
+                    self.collection_label_conflicts=conflicts
+                    if conflicts:self._log('Flow Agent reported different tracking labels for requested scenes: '+', '.join(map(str,conflicts))+'. These are not verified matches; unrelated outputs were not renamed or counted as downloaded.','warning')
                     report=Path(records[0]['output']).parent.parent/'scene_download_diagnostics.json'
                     atomic_json(report,{'missing_scenes':[r['index']+1 for r in records if r['status']!='complete'],
-                        'observed_assets':list(observed.values()),'completed_passes':download_passes if anchor else sweeps})
+                        'observed_assets':list(observed.values()),'completed_passes':download_passes if anchor else sweeps,'agent_label_conflicts':conflicts})
                     self._log('Available scene image scan complete. Unmatched scenes remain pending; this does not prove they were never generated. Diagnostics: '+str(report))
                     break
                 if settled or ambiguous_idle or time.monotonic()>=deadline or time.monotonic()-started>=3600:
@@ -441,7 +463,7 @@ class AgentMedia(ZBotImageGenerator):
                     report=Path(records[0]['output']).parent.parent/'agent_collection_diagnostics.json'
                     atomic_json(report,{'missing_scenes':[r['index']+1 for r in records if r['status']!='complete'],
                         'records':[{k:r.get(k) for k in ('index','token','status','asset_id')} for r in records],
-                        'observed_assets':list(observed.values())})
+                        'observed_assets':list(observed.values()),'agent_label_conflicts':agent_label_conflicts(self._agent_batch_reply(page,records),records)})
                     unlabelled=sum(a['asset_id'] not in reference_ids and not a.get('tracking_tokens') and not a.get('busy') and not a.get('failed') for a in observed.values())
                     retry_unmatched=(ambiguous_idle and getattr(self,'retry_unmatched_images',False)
                         and all(r['kind']=='image' for r in records))
@@ -449,6 +471,12 @@ class AgentMedia(ZBotImageGenerator):
                     hint=' Flow is idle and the grid scan found no matching outputs. Use Generate Missing to request these scenes only.' if settled else ' Retry collects existing outputs only; no batch resubmitted.'
                     raise error(f'Agent batch paused. Unresolved scenes: {missing}; {len(observed)} assets observed, {unlabelled} media assets without readable tracking labels. Saved outputs retained.'+hint+f' Diagnostics: {report}')
                 refusal='' if getattr(self,'available_only',False) else self._agent_refusal(page,records)
+                if not getattr(self,'available_only',False):
+                    conflicts=agent_label_conflicts(self._agent_batch_reply(page,records),records)
+                    if conflicts and not any(a.get('busy') for a in assets):
+                        # A foreign label is not missing-media evidence. Do not
+                        # spend more quota automatically recreating the batch.
+                        raise RuntimeError(label_conflict_message(conflicts))
                 if refusal:
                     missing=', '.join(str(r['index']+1) for r in records if r['status']!='complete')
                     for r in records:
@@ -899,8 +927,8 @@ def generate_agent_media(scenes,config,cancel,log,on_media,reference_records=Non
                 log('Downloaded the next batch in scene order. Generate the next text file, then click Download Generated Batch again. Build All reuses saved images.')
                 return records
             continue
-        if start not in recovered and any(possibly_sent(r) and r['status']=='pending' for r in missing):
-            log('Retry verification: this batch was prepared previously and may have been submitted manually. Checking Flow outputs before any new submission.')
+        if start not in recovered and any(possibly_sent(r) and (image_batch or r['status']=='pending') for r in missing):
+            log('Retry verification: this image batch was prepared or submitted previously. Downloading verified existing outputs before any new submission; only unresolved scenes can be requested again.')
             if collect_or_recover(missing,start,verify_existing=True):
                 return generate_agent_media(scenes,{**config,'_recovered_batches':list(recovered)},cancel,log,on_media,reference_records=reference_records)
             log('Previously generated batch recovered and saved; no prompts resubmitted.')

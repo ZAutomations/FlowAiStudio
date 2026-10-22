@@ -11,12 +11,15 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 from .storage import ROOT, atomic, public, read, redact
-KINDS = {'studio': {'voice', 'render', 'browser'}, 'animate': {'voice', 'render', 'browser'}, 'studio-batch': {'voice', 'render', 'browser'}, 'animate-batch': {'voice', 'render', 'browser'}}
+
+KINDS = {'quick': {'render', 'voice'}, 'studio': {'render', 'voice', 'browser'}, 'studio-batch': {'render', 'voice', 'browser'}, 'animate-batch': {'render', 'voice', 'browser'},
+         'animate': {'render', 'voice', 'browser'}, 'dubbing': {'render', 'voice'},
+         'dub-tools': {'render', 'voice'}, 'thumbnail': {'image-api'}, 'voice': {'voice'}, 'cleanup': {'render'}, 'ourscript': {'render', 'voice', 'image-api'}}
 TERMINAL = {'completed', 'failed', 'stopped', 'interrupted'}
 
 def worker_python():
-    from bootstrap import PYTHON
-    return str(PYTHON) if PYTHON.is_file() else sys.executable
+    candidate=ROOT/'.venv/Scripts/python.exe'
+    return str(candidate) if candidate.is_file() else sys.executable
 
 def download_scan_message(summary):
     saved=summary.get('saved',0);unmatched=summary.get('unmatched',0)
@@ -25,16 +28,17 @@ def download_scan_message(summary):
         message+=f" {len(summary['gaps'])} unmatched gaps through scene {summary.get('highest_saved_scene',0)}."
     elif summary.get('unmatched'):
         message+=f" {summary['unmatched']} later scenes not matched."
+    if summary.get('agent_label_conflicts'):
+        message+=' Flow reported incorrect tracking labels for '+str(len(summary['agent_label_conflicts']))+' requested scenes; these were not counted as saved.'
     return message
 
-def timestamped_log(line, started=None, now=None):
-    now = time.time() if now is None else now
-    stamp = datetime.fromtimestamp(now).astimezone().strftime('%Y-%m-%d %H:%M:%S %z')
-    elapsed = max(0, now - started) if started is not None else 0
+def timestamped_log(line,started=None,now=None):
+    now=time.time() if now is None else now
+    stamp=datetime.fromtimestamp(now).astimezone().strftime('%Y-%m-%d %H:%M:%S %z')
+    elapsed=max(0,now-started) if started is not None else 0
     return f'[{stamp}] [+{elapsed:.1f}s] {line}'
 
 class Jobs:
-
     def __init__(self, store):
         self.store = store
         self.directory = store.root / '.desktop'
@@ -72,7 +76,10 @@ class Jobs:
         with self.lock:
             if self.closed:
                 raise ValueError('Application is shutting down')
-            job = {'id': uuid.uuid4().hex, 'kind': kind, 'payload': payload, 'settings': public(settings if settings is not None else self.store.worker_settings()), 'state': 'queued', 'progress': 0, 'message': 'Waiting for available resources', 'created': time.time(), 'logs': [], 'result': None}
+            job = {'id': uuid.uuid4().hex, 'kind': kind, 'payload': payload,
+                   'settings': public(settings if settings is not None else self.store.worker_settings()),
+                   'state': 'queued', 'progress': 0, 'message': 'Waiting for available resources',
+                   'created': time.time(), 'logs': [], 'result': None}
             self.items.append(job)
             self._save()
             return copy.deepcopy(job)
@@ -107,7 +114,7 @@ class Jobs:
         if KINDS[a['kind']] & KINDS[b['kind']]:
             return True
         paths = lambda j: [Path(j['payload'][k]).resolve() for k in ('output_folder', 'output', 'project', 'source_project', 'channel') if j['payload'].get(k)]
-        return any((p == q or p in q.parents or q in p.parents for p in paths(a) for q in paths(b)))
+        return any(p == q or p in q.parents or q in p.parents for p in paths(a) for q in paths(b))
 
     def _schedule(self):
         while not self.closed:
@@ -115,18 +122,18 @@ class Jobs:
                 running = [j for j in self.items if j['state'] in ('running', 'stopping')]
                 changed = False
                 for job in self.items:
-                    if job['state'] == 'queued' and (not any((self.conflicts(job, j) for j in running))):
-                        job.update(state='running', message='Starting engine', started=time.time())
+                    if job['state'] == 'queued' and not any(self.conflicts(job, j) for j in running):
+                        job.update(state='running', message='Starting engine',started=time.time())
                         running.append(job)
                         threading.Thread(target=self._run, args=(job,), daemon=True).start()
                         changed = True
                 if changed:
                     self._save()
-            time.sleep(0.4)
+            time.sleep(.4)
 
     def _run(self, job):
         settings = self.store.worker_settings()
-
+        # Frozen public settings + current credentials. Never persist credentials in history.
         def overlay(old, new):
             for key, value in new.items():
                 if isinstance(value, dict) and isinstance(old.get(key), dict):
@@ -134,14 +141,18 @@ class Jobs:
                 else:
                     old[key] = copy.deepcopy(value)
         overlay(settings, job['settings'])
-        request = {'kind': job['kind'], 'payload': job['payload'], 'settings': settings, 'cancel': str(self.directory / (job['id'] + '.cancel'))}
+        request = {'kind': job['kind'], 'payload': job['payload'], 'settings': settings,
+                   'cancel': str(self.directory / (job['id'] + '.cancel'))}
         try:
-            process = subprocess.Popen([worker_python(), '-X', 'utf8', '-u', '-m', 'desktop.worker'], cwd=ROOT, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace', creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+            process = subprocess.Popen([worker_python(), '-X', 'utf8', '-u', '-m', 'desktop.worker'], cwd=ROOT,
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, encoding='utf-8', errors='replace',
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
             with self.lock:
                 self.processes[job['id']] = process
             process.stdin.write(json.dumps(request) + '\n')
             process.stdin.close()
-            progress_start, progress_span = (0, 100)
+            progress_start, progress_span = 0, 100
             for line in process.stdout:
                 with self.lock:
                     line = redact(line.rstrip(), settings)
@@ -157,13 +168,13 @@ class Jobs:
                             if 'batch' in event:
                                 job['batch'] = event['batch']
                             if 'range_start' in event:
-                                progress_start, progress_span = (event['range_start'], event['range_size'])
+                                progress_start, progress_span = event['range_start'], event['range_size']
                             continue
                         except (ValueError, TypeError):
                             pass
-                    job['logs'].append(timestamped_log(line, job.get('started')))
+                    job['logs'].append(timestamped_log(line,job.get('started')))
                     if job['kind'] in ('quick', 'ourscript'):
-                        frame = re.search('Frame\\s+\\d+/\\d+\\s+\\((\\d+)%\\)', line)
+                        frame = re.search(r'Frame\s+\d+/\d+\s+\((\d+)%\)', line)
                         if frame:
                             job['progress'] = min(100, progress_start + float(frame[1]) * progress_span / 100)
                     job['logs'] = job['logs'][-500:]
@@ -171,18 +182,19 @@ class Jobs:
             process.stdout.close()
             with self.lock:
                 stopped = job['state'] == 'stopping'
-                job['finished'] = time.time()
-                job.update(state='stopped' if stopped else 'completed' if code == 0 else 'failed', message='Stopped. Retry resumes saved work.' if stopped else 'Completed' if code == 0 else 'Failed. Read the log and retry.')
-                if code != 0 and (not stopped) and any(('Account limit reached:' in line for line in job['logs'])):
+                job['finished']=time.time()
+                job.update(state='stopped' if stopped else ('completed' if code == 0 else 'failed'),
+                    message='Stopped. Retry resumes saved work.' if stopped else ('Completed' if code == 0 else 'Failed. Read the log and retry.'))
+                if code != 0 and not stopped and any('Account limit reached:' in line for line in job['logs']):
                     job['message'] = 'Account limit reached. Progress saved; retry with the same account when quota is available.'
-                if code != 0 and (not stopped) and any(('Flow rejected scene(s)' in line for line in job['logs'])):
+                if code != 0 and not stopped and any('Flow rejected scene(s)' in line for line in job['logs']):
                     job['message'] = 'Flow rejected a scene. Review its content or supply a replacement image. Completed images are saved.'
-                if code == 0 and (not stopped):
+                if code == 0 and not stopped:
                     job['progress'] = 100
-                    if job['kind'] == 'studio' and job['payload'].get('action') == 'download-all-images' and ((job.get('result') or {}).get('download') is not None):
-                        job['message'] = download_scan_message(job['result']['download'])
+                    if job['kind']=='studio' and job['payload'].get('action')=='download-all-images' and (job.get('result') or {}).get('download') is not None:
+                        job['message']=download_scan_message(job['result']['download'])
                     if job['kind'] == 'studio' and job['payload'].get('action') == 'plan':
-                        job['message'] = f"Parsed {(job.get('result') or {}).get('scenes', 0)} scenes. Complete — ready for images and voice."
+                        job['message'] = f"Parsed {(job.get('result') or {}).get('scenes',0)} scenes. Complete — ready for images and voice."
         except Exception as error:
             with self.lock:
                 job.update(state='failed', message=redact(error, settings))
@@ -197,7 +209,8 @@ class Jobs:
             process = self.processes.get(job_id)
             if process and process.poll() is None:
                 if os.name == 'nt':
-                    subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                    subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'], capture_output=True,
+                                   creationflags=subprocess.CREATE_NO_WINDOW)
                 else:
                     process.kill()
 
@@ -208,4 +221,4 @@ class Jobs:
                 self.stop(job['id'])
         deadline = time.monotonic() + 12
         while self.processes and time.monotonic() < deadline:
-            time.sleep(0.1)
+            time.sleep(.1)

@@ -23,7 +23,7 @@ def response_images(text, project_id):
             if not prompts:return
             prompt=prompts[0]
             if prompt.startswith(('Create one location identity reference.','Create one full-body character identity reference,')):return
-            if len(set(re.findall(r'AS_SCENE_[a-f0-9]+',prompt)))!=1:return
+            if len(set(re.findall(r'(?<![A-Za-z0-9_])AS_SCENE_[a-f0-9]+(?![A-Za-z0-9_])',prompt)))!=1:return
             yield {'asset_id':value[0],'src':meta[5],'kind':'image','busy':False,'failed':False,'visible':False,'prompt':prompt}
             return
         for item in value:yield from walk(item)
