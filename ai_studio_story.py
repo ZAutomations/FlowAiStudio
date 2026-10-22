@@ -84,8 +84,8 @@ def video_direction(prompt,direction=SILENT_DIRECTION,seconds=6,multishot=False)
     prompt=prompt.replace('One scene in this image.', 'One continuous scene in this video clip.')
     if seconds!=6:prompt=prompt.replace('six-second',str(seconds)+'-second')
     if multishot:
-        prompt=prompt.replace('One continuous scene in this video clip.','One generated video clip with 2–4 connected sequential shots.')
-        prompt+='\nThis is ONE '+str(seconds)+'-second video output containing 2–4 meaningful sequential shots. Use local shot timings in the visual directions; each shot shows its part of the unchanged narration. Cut naturally between actions/reactions/details; never turn shots into separate generated assets or a simultaneous collage. No generated audio.'
+        prompt=prompt.replace('One continuous scene in this video clip.','One generated video clip with TWO connected sequential shots by default (THREE only when genuinely needed; never four).')
+        prompt+='\nThis is ONE '+str(seconds)+'-second video output containing TWO meaningful sequential shots by default; THREE only when the narration needs a third beat, never four. Use local shot timings in the visual directions; each shot shows its part of the unchanged narration. Cut naturally between actions/reactions/details; never turn shots into separate generated assets or a simultaneous collage. No generated audio.'
     return scene_direction(prompt,direction)
 
 def parse_prompts(raw, scenes):
@@ -141,7 +141,7 @@ def write_story(adapter, q, config):
             'Use one plausible six-second action for a video; no montage or multiple cuts. '+direction+'\n'+TOPIC_DIRECTION+'\n'+MEANING_DIRECTION)
         if config.get('animate_multishot'):
             from ai_studio_animate_options import clip_seconds
-            system=system.replace('Use one plausible six-second action for a video; no montage or multiple cuts.', 'Each video row is ONE '+str(clip_seconds(config))+'-second output containing 2–4 sequential connected shots. In visual_prompt specify local shot timings covering the full clip, with distinct subject actions/reactions/framing matched to the narration. Do not generate separate outputs per shot or a simultaneous collage. Still-image rows remain single narration-based illustrations.')
+            system=system.replace('Use one plausible six-second action for a video; no montage or multiple cuts.', 'Each video row is ONE '+str(clip_seconds(config))+'-second output containing TWO sequential connected shots by default, THREE only when the narration needs a third beat, never four. In visual_prompt specify local shot timings covering the full clip, with distinct subject actions/reactions/framing matched to the narration. Do not generate separate outputs per shot or a simultaneous collage. Still-image rows remain single narration-based illustrations.')
         prompts=[]
         for start in range(0,len(scenes),8):
             check_cancel(adapter._zb_cancel)

@@ -19,11 +19,12 @@ def worker_python():
     return str(PYTHON) if PYTHON.is_file() else sys.executable
 
 def download_scan_message(summary):
-    message = f"Scan finished: {summary.get('saved', 0)} scene images saved; {summary.get('downloaded', 0)} new downloads."
+    saved=summary.get('saved',0);unmatched=summary.get('unmatched',0)
+    message=f"{'Images incomplete' if unmatched else 'All scene images saved'}: {saved} scene images saved ({saved}/{saved+unmatched}); {summary.get('downloaded',0)} new downloads. Scan finished."
     if summary.get('gaps'):
-        message += f" {len(summary['gaps'])} unmatched gaps through scene {summary.get('highest_saved_scene', 0)}."
+        message+=f" {len(summary['gaps'])} unmatched gaps through scene {summary.get('highest_saved_scene',0)}."
     elif summary.get('unmatched'):
-        message += f" {summary['unmatched']} later scenes not matched."
+        message+=f" {summary['unmatched']} later scenes not matched."
     return message
 
 def timestamped_log(line, started=None, now=None):

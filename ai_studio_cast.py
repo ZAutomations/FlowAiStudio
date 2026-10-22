@@ -214,6 +214,8 @@ def import_ready(adapter,q,config,value):
         raise ValueError('Import into a new video project; existing media and audio are retained.')
     raw=parse(value);script=raw.get('script')
     if not isinstance(script,str) or not script.strip():raise ValueError('Ready story needs the complete original script field.')
+    from ai_studio_narration_quality import validate_narration
+    validate_narration(script)
     data=validate(raw,script=script)
     if ' '.join(script.split())!=' '.join(config['script'].split()):raise ValueError('Ready-story script differs from the Script field.')
     adapter.zb_scenes=[dict(id=i+1,raw=r['narration'],source_line=i+1,narration=r['narration'],visual_prompt=r['visual_prompt'],caption='') for i,r in enumerate(data['scenes'])]

@@ -22,6 +22,51 @@ class AgentCollectionTests(unittest.TestCase):
         self.agent._download_video=Mock();self.agent._load_video_source=Mock(return_value='https://example/video/ready')
         self.saved=[];self.delivered=[]
     def tearDown(self):self.temp.cleanup()
+    def test_agent_retry_prompt_requires_existing_output_audit(self):
+        from ai_studio_animate_media import batch_prompt
+        config={'animate_model':'Omni 1.1 Flash','image_agent':True,'references':[],'style':'Illustration'}
+        records=[dict(index=48,kind='image',token='AS_SCENE_abcd',prompt='Current exact scene.',reference_names=[])]
+        text=batch_prompt(records,config)
+        self.assertIn('Already generated: OUTPUT',text)
+        self.assertIn('submit ZERO generation requests',text)
+        self.assertIn('ONLY the confirmed missing identities',text)
+        self.assertIn('Uncertain',text)
+        self.assertIn('AS_SCENE_abcd',text)
+        self.assertIn('0049',text)
+
+    def test_completed_asset_receipt_skips_prompt_popup(self):
+        self.agent.completed_scene_asset_ids={'asset9'}
+        self.agent._agent_assets=Mock(return_value=[self.asset(9),self.asset(0),self.asset(1)])
+        self.agent._asset_prompt=Mock(side_effect=lambda page,a:self.records[int(a['asset_id'][-1])]['token'])
+        self.agent.collect(self.records,lambda:None,self.delivered.append)
+        self.assertEqual([call.args[1]['asset_id'] for call in self.agent._asset_prompt.call_args_list],['asset0','asset1'])
+        self.assertEqual(len(self.delivered),2)
+
+    def test_scene_watermark_does_not_skip_gap(self):
+        from ai_studio_animate_media import update_batch_progress
+        state={'records':[{'index':i,'kind':'image','token':str(i),'status':'pending' if i==2 else 'complete'} for i in range(5)]}
+        update_batch_progress(state)
+        self.assertEqual(state['scene_progress']['image']['downloaded_through'],2)
+        self.assertEqual(state['scene_progress']['image']['completed_scene_numbers'],[1,2,4,5])
+
+    def test_wrong_batch_response_detected(self):
+        from ai_studio_animate_media import wrong_batch_reply
+        records=[{'index':i} for i in range(248,272)]
+        self.assertTrue(wrong_batch_reply('Generated OUTPUT 0201 to 0224',records))
+        self.assertFalse(wrong_batch_reply('Generated OUTPUT 0249 to 0272',records))
+        self.assertFalse(wrong_batch_reply('Ready',records))
+
+    def test_remounted_tile_ids_do_not_extend_idle_scan_forever(self):
+        self.agent._agent_assets=Mock(side_effect=lambda page:[self.asset(self.agent._agent_assets.call_count+10)])
+        self.agent._asset_prompt=Mock(return_value='old asset with no readable label')
+        self.page.evaluate.return_value={'x':500,'y':500,'delta':-1000,'at_end':True,'agent_busy':False,'failed':False}
+        clock=iter(range(0,5000,30))
+        with patch('ai_studio_animate_media.time.monotonic',side_effect=lambda:next(clock)),patch('ai_studio_animate_media.time.sleep'):
+            with self.assertRaisesRegex(RuntimeError,'Agent batch paused'):
+                self.agent.collect(self.records,lambda:None,self.delivered.append)
+        self.assertLess(self.agent._agent_assets.call_count,10)
+        self.agent._download_video.assert_not_called()
+
     def test_download_recovers_indexed_image_absent_from_virtual_grid(self):
         self.agent.available_only=True
         self.records=self.records[:1]
@@ -221,12 +266,14 @@ class AgentCollectionTests(unittest.TestCase):
         self.assertEqual(report['missing_scenes'],[1,2]);self.assertFalse(self.delivered)
         self.assertEqual([r['status'] for r in self.records],['submitted','submitted'])
         self.agent._download_video.assert_not_called()
-    def test_duplicate_identity_stops_without_assigning_scene(self):
-        self.agent._agent_assets=Mock(return_value=[self.asset(0),self.asset(1)])
-        self.agent._asset_prompt=Mock(return_value=self.records[0]['token'])
-        with self.assertRaisesRegex(RuntimeError,'More than one asset'):
-            self.agent.collect(self.records,lambda:None,self.delivered.append)
-        self.agent._download_video.assert_not_called()
+    def test_duplicate_video_identity_retains_variant_and_continues(self):
+        self.agent._agent_assets=Mock(return_value=[self.asset(3),self.asset(0),self.asset(1)])
+        self.agent._asset_prompt=Mock(side_effect=lambda page,a:self.records[0]['token'] if a['asset_id'] in ('asset3','asset0') else self.records[1]['token'])
+        self.agent.collect(self.records,lambda:None,self.delivered.append)
+        self.assertEqual(self.records[0]['asset_id'],'asset0')
+        self.assertEqual(self.records[0]['alternate_asset_ids'],['asset3'])
+        self.assertEqual(len(self.delivered),2)
+        self.assertEqual(self.agent._download_video.call_count,2)
 
     def test_download_all_keeps_stable_variant_and_continues_other_scenes(self):
         self.agent.available_only=True

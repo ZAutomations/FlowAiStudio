@@ -17,38 +17,42 @@ def enabled(config):
 
 
 def measured_words(scenes):
-    """Keep original text/punctuation, using ASR matches to place source words."""
-    source=[]; spoken=[]; expected=[]; original=[]; durations=[]; cursor=0
+    """Anchor words inside their own verified audio scene, never across a story.
+
+    Global text matching can map repeated passages to a later occurrence and
+    move narration away from its source visual. Scene audio boundaries are the
+    authoritative limits even when individual ASR words need interpolation.
+    """
+    result=[];durations=[];cursor=0;matched_count=0;word_count=0
     for scene in scenes:
         duration=probe(scene['audio_path'])[0];durations.append(duration)
-        for word in re.findall(r'\S+',scene['narration']):
-            original.append(word)
-            expected.extend((token,len(original)-1) for token in tokens(word))
+        original=re.findall(r'\S+',scene['narration']);expected=[];spoken=[];timing=[]
+        for i,word in enumerate(original):expected.extend((token,i) for token in tokens(word))
         for word in scene.get('word_timings',[]):
+            start=float(word['offset']);length=float(word.get('duration',.1))
+            if start<0 or start>=duration or length<=0:continue
             for token in tokens(word['word']):
-                spoken.append(token)
-                source.append((cursor+float(word['offset']),float(word.get('duration',.1))))
+                spoken.append(token);timing.append((start,min(length,duration-start)))
+        mapping={}
+        for block in difflib.SequenceMatcher(None,[v[0] for v in expected],spoken,autojunk=False).get_matching_blocks():
+            for i in range(block.size):mapping.setdefault(expected[block.a+i][1],timing[block.b+i])
+        matched_count+=len(mapping);word_count+=len(original);local=[]
+        for i,word in enumerate(original):
+            if i in mapping:start,length=mapping[i];origin='matched'
+            else:
+                left=max((j for j in mapping if j<i),default=None)
+                right=min((j for j in mapping if j>i),default=None)
+                a=mapping[left][0]+mapping[left][1] if left is not None else 0
+                b=mapping[right][0] if right is not None else duration
+                count=(right if right is not None else len(original))-(left if left is not None else -1)
+                length=max(.001,(b-a)/max(1,count))
+                start=a+length*(i-(left if left is not None else -1)-1);origin='interpolated'
+            start=max(local[-1]['offset'] if local else 0,min(duration,start))
+            local.append({'word':word,'offset':start,'duration':max(.001,min(length,duration-start)),'alignment':origin})
+        result.extend({**word,'offset':cursor+word['offset']} for word in local)
         cursor+=duration
-    mapping={}
-    for block in difflib.SequenceMatcher(None,[v[0] for v in expected],spoken,autojunk=False).get_matching_blocks():
-        for i in range(block.size):
-            mapping.setdefault(expected[block.a+i][1],source[block.b+i])
-    if len(mapping)/max(1,len(original))<.65:
+    if matched_count/max(1,word_count)<.65:
         raise RuntimeError('Cinematic word alignment is uncertain. Saved narration retained; try stronger alignment before planning clips.')
-    result=[]
-    for i,word in enumerate(original):
-        if i in mapping:
-            start,length=mapping[i];origin='matched'
-        else:
-            left=max((j for j in mapping if j<i),default=None)
-            right=min((j for j in mapping if j>i),default=None)
-            a=mapping[left][0]+mapping[left][1] if left is not None else 0
-            b=mapping[right][0] if right is not None else cursor
-            count=(right if right is not None else len(original))-(left if left is not None else -1)
-            length=max(.01,(b-a)/max(1,count))
-            start=a+length*(i-(left if left is not None else -1)-1);origin='interpolated'
-        start=max(result[-1]['offset'] if result else 0,min(cursor,start))
-        result.append({'word':word,'offset':start,'duration':max(.001,min(length,cursor-start)), 'alignment':origin})
     return result,durations
 
 
@@ -88,8 +92,16 @@ def clip_rows(source,config,folder):
                 'cinematic_kind':'video' if start<cutoff-1e-6 else 'image',
                 'word_timings':[{**w,'offset':max(0,w['offset']-start),'duration':min(w['duration'],max(.001,end-w['offset']))} for w in selected]})
             overlapping=[s for left,right,s in source_edges if left<end-1e-6 and right>start+1e-6]
+            if rows[-1]['cinematic_kind']=='image' and overlapping:
+                # One still depicts one source beat, not several conflicting
+                # prompts concatenated from adjacent spoken scenes.
+                primary=max((edge for edge in source_edges if edge[0]<end-1e-6 and edge[1]>start+1e-6),
+                    key=lambda edge:min(edge[1],end)-max(edge[0],start))
+                overlapping=[primary[2]]
             rows[-1]['source_visuals']=[{'visual_prompt':s.get('visual_prompt',''),'shots':s.get('shots',[]),
+                'source_scene_id':s.get('id'),'source_narration':s['narration'],
                 'continuity':s.get('cinematic_continuity',{}),'references':s.get('reference_names',[])} for s in overlapping]
+            rows[-1]['source_scene_ids']=[v['source_scene_id'] for v in rows[-1]['source_visuals']]
     if ' '.join(' '.join(r['narration'] for r in rows).split()) != ' '.join(' '.join(s['narration'] for s in source).split()):
         raise RuntimeError('Cinematic narration partition failed; original scenes retained.')
     return rows
@@ -99,14 +111,14 @@ SYSTEM='''You are a film continuity director planning visuals to EXISTING contin
 Return ONLY a JSON array, one row per requested clip, in order. Each row must have:
 clip (the exact supplied number), visual_prompt, location, start_state, end_state,
 continues_previous (boolean), references (array of supplied exact reference names), shots.
-For videos shots must contain 2-4 objects {start,end,visual_prompt}, contiguous 0 to 8 seconds.
+For videos shots must contain TWO objects by default, or THREE only when the narration needs a third distinct beat, never four. Each object is {start,end,visual_prompt}, contiguous 0 to 8 seconds.
 One row means ONE generated eight-second clip with several sequential shots, never a collage or separate output per shot.
 The last clip may be trimmed to its supplied used duration; put its narrated events BEFORE that duration ends.
 For still-image rows use shots=[] and describe one concrete still; do not turn the remaining image section into videos.
 Do NOT rewrite, translate or return narration. Narration already exists and must never be synthesized again per clip.
 Read the full story, nearby narration and PREVIOUS END STATE. Show the actual topic/events, never unrelated keyword metaphors.
 Keep faces, wardrobe, props, handedness, screen direction, spatial layout, lighting and time consistent.
-Choose a meaningful 2-4-shot rhythm from the narrated events, rather than a separate image for each sentence.
+Default to TWO shots (0-4s, 4-8s). Use THREE only for a genuinely necessary third narrated beat; never force extra cuts or one shot per sentence.
 When this continues the same moment/location: set continues_previous=true and copy the preceding end_state EXACTLY
 into start_state; use the supplied previous last-frame reference as the visual starting point, then progress the action.
 When the narration genuinely changes time or place, set continues_previous=false and clearly establish the new scene.
@@ -134,7 +146,7 @@ def validate_plan(raw,rows,allowed,previous=None):
                 raise RuntimeError('Cinematic continuity states do not join. Planning checkpoint retained; retry this batch.')
         shots=item.get('shots')
         if row['cinematic_kind']=='video':
-            if not isinstance(shots,list) or not 2<=len(shots)<=4:raise RuntimeError('Each cinematic video clip needs 2-4 shots.')
+            if not isinstance(shots,list) or not 2<=len(shots)<=3:raise RuntimeError('Each cinematic video clip needs 2 shots by default, at most 3 when needed.')
             end=0
             for shot in shots:
                 try:a=float(shot['start']);b=float(shot['end'])
@@ -174,10 +186,14 @@ def prepare(adapter,q,config,tts,recognize=transcribe):
     if config.get('cinematic_ready_prompts'):legacy_identity=fingerprint(legacy_identity,'ready-source-prompts-v1',legacy_source)
     if config.get('character_consistency'):identity=fingerprint(identity,'full-cast-v1',config['cast_assets'],config['scene_reference_map'])
     if config.get('cinematic_ready_prompts'):identity=fingerprint(identity,'ready-source-prompts-v1',source)
+    local_identity=fingerprint(identity,'scene-local-word-anchors-v2')
+    if not committed or (root/'cinematic'/local_identity[:16]/'storyboard.json').exists():identity=local_identity
     folder=root/'cinematic'/identity[:16];folder.mkdir(parents=True,exist_ok=True)
     cache_file=folder/'storyboard.json'
     legacy_cache=root/'cinematic'/legacy_identity[:16]/'storyboard.json'
-    if config.get('character_consistency') and not cache_file.exists() and legacy_cache.exists():
+    local_legacy_cache=root/'cinematic'/fingerprint(legacy_identity,'scene-local-word-anchors-v2')[:16]/'storyboard.json'
+    if local_legacy_cache.exists():legacy_cache=local_legacy_cache
+    if committed and config.get('character_consistency') and not cache_file.exists() and legacy_cache.exists():
         cache_file=legacy_cache;folder=legacy_cache.parent
         q.put(('log','info','Adding cast metadata to the existing reviewed cinematic timeline; saved narration, shots and images are reused.'))
     if cache_file.exists():
@@ -220,19 +236,23 @@ def prepare(adapter,q,config,tts,recognize=transcribe):
             visuals=row['source_visuals']
             if not visuals or any(not v['visual_prompt'].strip() for v in visuals):raise ValueError('Ready cinematic video prompts are missing; import both complete JSON files.')
             directed=[v for v in visuals if v['continuity'] and v['shots']]
-            if not directed:
-                directed=[v for source_scene in source for v in [{'continuity':source_scene.get('cinematic_continuity',{}),'shots':source_scene.get('shots',[]),'visual_prompt':source_scene.get('visual_prompt','')}] if v['continuity'] and v['shots']][-1:]
-            first=directed[0] if directed else visuals[0];last=directed[-1] if directed else visuals[-1];state=first['continuity']
-            if not state:raise ValueError('Ready video JSON needs continuity states for each source clip.')
-            count=min(4,max(2,sum(len(v['shots']) for v in visuals)))
+            first=directed[0] if directed else visuals[0];last=directed[-1] if directed else visuals[-1]
+            # Never borrow the final directed clip from elsewhere in the story.
+            # If measured audio extends into a supplied still beat, animate that
+            # current beat only and explicitly avoid a false continuation.
+            state=first['continuity'] or {'location':'Current narrated setting',
+                'start_state':'Show the current source beat only; preserve its assigned reference identities.',
+                'end_state':'Conclude the current narrated action without adding a new event.', 'continues_previous':False}
+            end_state=last['continuity'].get('end_state',state['end_state'])
+            count=3 if len(visuals)==1 and len(visuals[0]['shots'])==3 else 2
             actions=[shot['visual_prompt'] for v in visuals for shot in v['shots']]
             if not actions:actions=[v['visual_prompt'] for v in visuals]
             if len(actions)==1:actions.append('Hold the established action and show its natural reaction; no new event.')
-            if len(actions)<2:raise ValueError('Ready video clips require 2-4 shot directions.')
+            if len(actions)<2:raise ValueError('Ready video clips require 2 shots by default, at most 3 when needed.')
             shots=[{'start':round(i*8/count,6),'end':8 if i==count-1 else round((i+1)*8/count,6),
                     'visual_prompt':' '.join(actions[math.floor(i*len(actions)/count):math.floor((i+1)*len(actions)/count)]) or 'Hold the established composition and action.'} for i in range(count)]
             item={'clip':row['id'],'visual_prompt':'\n'.join(v['visual_prompt'] for v in visuals),
-                  'location':state['location'],'start_state':state['start_state'],'end_state':last['continuity']['end_state'],
+                  'location':state['location'],'start_state':state['start_state'],'end_state':end_state,
                   'continues_previous':bool(previous and state.get('continues_previous') and previous['location']==state['location']),
                   'references':sorted({r for v in visuals for r in v['references']}),'shots':shots}
             if item['continues_previous']:item['start_state']=previous['end_state']
