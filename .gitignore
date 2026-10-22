@@ -29,3 +29,7 @@ BUNDLE_MANIFEST.json
 EXTRACTION_PLAN.md
 Thumbs.db
 .DS_Store
+
+models/
+setup/installers/
+setup/wheels/
