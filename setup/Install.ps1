@@ -9,9 +9,10 @@ function Has-App($id) {
         'Microsoft.EdgeWebView2Runtime' {
             return [bool]((Test-Path "${env:ProgramFiles(x86)}\Microsoft\EdgeWebView\Application\*\msedgewebview2.exe") -or (Test-Path "$env:LOCALAPPDATA\Microsoft\EdgeWebView\Application\*\msedgewebview2.exe") -or (Test-Path "$env:ProgramFiles\Microsoft\EdgeWebView\Application\*\msedgewebview2.exe"))
         }
+        'Microsoft.VCRedist.2015+.x64' { return [bool]((Test-Path "$env:WINDIR\System32\msvcp140.dll") -and (Test-Path "$env:WINDIR\System32\vcruntime140.dll")) }
     }
 }
-foreach ($id in @('Git.Git','Google.Chrome','Microsoft.EdgeWebView2Runtime')) {
+foreach ($id in @('Git.Git','Google.Chrome','Microsoft.EdgeWebView2Runtime','Microsoft.VCRedist.2015+.x64')) {
     if (Has-App $id) { Write-Host "Already installed: $id"; continue }
     if ($CheckOnly) { Write-Host "Missing: $id"; continue }
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
