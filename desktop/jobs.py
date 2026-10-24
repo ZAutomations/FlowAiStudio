@@ -73,6 +73,10 @@ class Jobs:
             raise ValueError('Unknown operation')
         if public(payload) != payload:
             raise ValueError('Credentials are not allowed in jobs')
+        payload = copy.deepcopy(payload)
+        if kind in ('studio', 'animate'):
+            payload.setdefault('auto_retry', True)
+            payload.setdefault('auto_retry_seconds', 10)
         with self.lock:
             if self.closed:
                 raise ValueError('Application is shutting down')

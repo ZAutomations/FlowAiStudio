@@ -1,4 +1,4 @@
-"""Opt-in retry policy and file-verified part compilation."""
+"""Default-on processing retries and file-verified part compilation."""
 import math,time
 
 PROCESSING_ACTIONS={'images','generate-missing','cinematic-images','cinematic-videos','voice','render','build','compile-part','recover','download-batches','download-all-images','references','download-reference-images','thumbnails','retry-thumbnails','prompts','write-story','continuity-ledger'}
@@ -6,7 +6,7 @@ PROCESSING_ACTIONS={'images','generate-missing','cinematic-images','cinematic-vi
 def schedule_retry(job,closed=False,now=None):
     if closed or job.get('state')!='failed' or job.get('retry_disabled'):return False
     payload=job.get('payload',{})
-    if job.get('kind') not in ('studio','animate') or payload.get('auto_retry') is not True:return False
+    if job.get('kind') not in ('studio','animate') or payload.get('auto_retry', True) is not True:return False
     if payload.get('action','build') not in PROCESSING_ACTIONS:return False
     delay=payload.get('auto_retry_seconds',10)
     try:delay=float(delay)

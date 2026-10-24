@@ -8,6 +8,31 @@ class JobAutomationTests(unittest.TestCase):
   job={'id':'same','kind':'studio','state':'failed','payload':{'action':'images','auto_retry':True,'auto_retry_seconds':5},'result':{'old':1}}
   for n in range(1,101):
    self.assertTrue(schedule_retry(job,now=100));self.assertEqual(job['retry_at'],105);self.assertEqual(job['id'],'same');self.assertEqual(job['auto_retry_count'],n);self.assertIsNone(job['result']);job['state']='failed'
+ def test_legacy_payload_defaults_to_retry(self):
+  job={'kind':'studio','state':'failed','payload':{'action':'images'}}
+  self.assertTrue(schedule_retry(job,now=100));self.assertEqual(job['retry_at'],110)
+ def test_worker_failure_schedules_retry_end_to_end(self):
+  from unittest.mock import patch
+  import io
+  with tempfile.TemporaryDirectory() as folder:
+   jobs=Jobs.__new__(Jobs);jobs.lock=threading.RLock();jobs.directory=Path(folder);jobs.closed=False;jobs.processes={};jobs._save=lambda:None
+   class Store:
+    def worker_settings(self):return {}
+   jobs.store=Store()
+   job={'id':'legacy','kind':'studio','state':'running','payload':{'action':'images'},'settings':{},'logs':[]}
+   class Process:
+    stdin=io.StringIO();stdout=io.StringIO('[ERROR] temporary connection failed\n')
+    def wait(self):return 1
+   with patch('desktop.jobs.subprocess.Popen',return_value=Process()):jobs._run(job)
+   self.assertEqual(job['state'],'queued');self.assertEqual(job['auto_retry_count'],1)
+   self.assertGreater(job['retry_at'],0);self.assertIn('Auto retry 1',job['logs'][-1])
+ def test_submission_persists_default_and_respects_off(self):
+  with tempfile.TemporaryDirectory() as folder:
+   jobs=Jobs.__new__(Jobs);jobs.lock=threading.RLock();jobs.directory=Path(folder);jobs.closed=False;jobs.items=[];jobs._save=lambda:None
+   enabled=jobs.submit('studio',{'action':'images'},settings={})
+   self.assertIs(enabled['payload']['auto_retry'],True)
+   disabled=jobs.submit('animate',{'action':'images','auto_retry':False},settings={})
+   self.assertIs(disabled['payload']['auto_retry'],False)
  def test_stop_and_disabled_and_completed_never_retry(self):
   for patch in ({'retry_disabled':True},{'state':'stopped'},{'state':'completed'},{'payload':{'auto_retry':False}},{'payload':{'auto_retry':True,'action':'import-ready-animation'}}):
    job={'kind':'studio','state':'failed','payload':{'action':'images','auto_retry':True},**patch}
