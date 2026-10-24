@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 from ai_studio_pipeline import atomic_json,fingerprint,valid_image,check_cancel
+from ai_studio_reference_agent import sheet_prompt
 
 
 def run(config,cancel,log,download=False):
@@ -39,13 +40,13 @@ def run(config,cancel,log,download=False):
     if not download:
         text=['CHARACTERS AND LOCATIONS PROMPTS','Selected visual preset: '+config.get('style_name',''),
             'Visual style: '+config['style'],
-            'Generate exactly one separate image per numbered reference below. Never combine references into a collage.',
+            'Generate exactly one separate image per numbered reference below. Each identity must be one four-view sheet. Never combine different identities into one sheet.',
             'Begin each individual saved image generation prompt with its exact AS_SCENE tracking label. This identifies a REFERENCE, not a story scene. Never display the label or reference name inside the artwork.',
             'Keep the labels unchanged so the app can download and rename each image correctly. Do not generate references listed as already saved.']
         saved=[r['name'] for r in state['records'] if r['status']=='complete']
         if saved:text.append('Already saved — do not generate: '+', '.join(saved))
         for i,r in enumerate(pending,1):
-            text.append(f"REFERENCE {i}: {r['name']} ({r['reference_kind']}) — save locally as {r['name']}.png\n{r['token']}\n{r['prompt']}")
+            text.append(f"REFERENCE {i}: {r['name']} ({r['reference_kind']}) — save locally as {r['name']}.png\n{r['token']}\n{sheet_prompt(r)}")
         path=root/'characters_and_locations_prompts.txt';path.write_text('\n\n'.join(text),encoding='utf-8')
         log(f'Exported {len(pending)} character/location prompts: {path}. Generate these in this story’s Flow project, then click Download / rename / upload references. No generation submitted.')
         return None
