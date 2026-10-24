@@ -135,6 +135,77 @@ Finish with an audit listing existing/reused, newly generated, pending and uncer
 """
 
 
+def parse_missing_audit(reply,records,audit_id):
+    """Accept a fresh, exhaustive provider audit; never infer missing from a scan."""
+    decoder=json.JSONDecoder();data=None
+    for i,c in enumerate(reply or ''):
+        if c!='{':continue
+        try:value,_=decoder.raw_decode(reply[i:])
+        except ValueError:continue
+        if isinstance(value,dict) and value.get('audit_id')==audit_id:data=value;break
+    if not data or data.get('generation_allowed') is not True:return []
+    rows=data.get('outputs')
+    if not isinstance(rows,list) or len(rows)!=len(records):return []
+    wanted={(r['index']+1,r['token']) for r in records};seen=set();missing=[]
+    for row in rows:
+        if not isinstance(row,dict):return []
+        pair=(row.get('scene'),row.get('token'))
+        if pair not in wanted or pair in seen:return []
+        seen.add(pair)
+        if row.get('status')=='missing' and row.get('checked_saved_prompts') is True:missing.append(pair)
+        elif row.get('status') not in ('existing','processing','blocked','uncertain'):return []
+    return [r for r in records if (r['index']+1,r['token']) in missing]
+
+
+def audit_missing_outputs(generator,records,config,cancel,log):
+    """Ask Flow to inspect exact IDs without generating anything, then reconcile."""
+    import uuid
+    audit_id=uuid.uuid4().hex
+    table=[{'scene':r['index']+1,'token':r['token']} for r in records]
+    prompt=('AUDIT ONLY. DO NOT GENERATE, retry, edit, rename or delete ANY media. '
+        'Inspect saved media generation prompts and in-flight jobs for these EXACT output identities. '
+        'Output numbers alone and similar pictures do not prove identity. A gallery search miss alone is uncertain. '
+        'If policy refusal, unusual activity or a current generation restriction prevents continuation, set generation_allowed false. '
+        'For every requested identity, return status existing, processing, missing, blocked or uncertain. '
+        'Use missing only after checking saved generation prompts and confirming there is no matching output or in-flight request. '
+        'Return ONLY JSON: {"audit_id":"'+audit_id+'","generation_allowed":true,"outputs":'
+        '[{"scene":1,"token":"EXACT REQUESTED TOKEN","status":"missing","checked_saved_prompts":true}]}. '
+        'Use the exact scene/token pairs below. No generation is authorized by this audit.\n'+json.dumps(table))
+    path=Path(config['project'])/'agent_missing_audit.txt';path.write_text(prompt,encoding='utf-8')
+    log('Reconciling only unresolved scene identities with Flow Agent (audit only; no image generation).')
+    with generator._session(headless=False) as ctx:
+        page=generator._batch_page(ctx)
+        prepare_batch_prompt({**config,'references':[],'reference_descriptions':{},'_agent_cdp_port':generator.cdp_port},path,cancel,log)
+        composer=page.locator('div.ProseMirror[contenteditable=true]').first
+        if audit_id not in composer.inner_text():raise RuntimeError('Reconciliation audit was not prepared correctly; no resubmission authorized.')
+        wait_agent_ready(page,cancel,log)
+        page.locator('button[aria-label="Start generation"]').first.click(timeout=5000)
+        deadline=time.monotonic()+150
+        while time.monotonic()<deadline:
+            check_cancel(cancel)
+            reply=generator._agent_batch_reply(page,records)
+            verified=parse_missing_audit(reply,records,audit_id)
+            if verified:
+                atomic_json(Path(config['project'])/'agent_missing_audit.json',{'audit_id':audit_id,'requested':table,'reply':reply,'confirmed_missing':[r['index']+1 for r in verified]})
+                return verified
+            # A complete negative audit is retained and must not lead to generation.
+            if audit_id in reply and '"outputs"' in reply and '}' in reply:
+                try:
+                    for i,c in enumerate(reply):
+                        if c=='{':
+                            data,_=json.JSONDecoder().raw_decode(reply[i:])
+                            if isinstance(data,dict) and data.get('audit_id')==audit_id:
+                                atomic_json(Path(config['project'])/'agent_missing_audit.json',{'audit_id':audit_id,'requested':table,'reply':reply,'confirmed_missing':[]})
+                                return []
+                except ValueError:pass
+            time.sleep(1)
+    raise RuntimeError('Flow did not provide a complete exact-identity audit. No uncertain scenes resubmitted; saved progress retained.')
+
+
+def explicit_missing_recovery(config):
+    """Only an explicit user stage may retry a previously submitted identity."""
+    return config.get('_generate_missing') is True
+
 def batch_prompt(records,config):
     from ai_studio_story import is_narration_story, narration_direction
     from ai_studio_visual_context import TOPIC_DIRECTION,MEANING_DIRECTION
@@ -158,6 +229,15 @@ def batch_prompt(records,config):
         lines[2]='Attach only the references assigned to each scene. Never force the entire batch cast into one image.'
         lines[5]='ALL outputs must be still IMAGES using '+preferred(config)+'. Never create video clips, animation, music or audio.\n'+batch_instructions(config)
         lines[6]='Preserve reference identity only where that character or place occurs in the scene. Never force every attached character into every image. Preserve faces, age, hair, clothing, architecture and period details; do not substitute a similar-looking person.'
+    if records and all(r['kind']=='image' for r in records):
+        lines.append('IMAGE BATCH EXECUTION: this is ONE batch containing '+str(len(records))+' independent scene images, not '+str(len(records))+' separate conversational turns. '
+            'Perform ONE preflight reconciliation for the exact identity table, partitioning existing, in-flight and confirmed missing outputs. '
+            'Then enqueue ALL confirmed missing scene requests together in the same Agent turn, using batch/parallel image tool calls where supported. '
+            'Each request remains x1 with its own exact tracking label and assigned references. Do NOT wait for one image to finish, inspect its quality, download it or ask for approval before enqueueing the next independent scene. '
+            'If the platform imposes a concurrency cap, enqueue up to that cap and keep filling available slots; do not bypass limits. '
+            'Wait/collect after requests have been queued. Do not repeat the gallery audit between individual submissions, create extra variants, or regenerate existing/in-flight identities. '
+            'If the provider requires strictly serial execution, state that limitation explicitly; do not claim all requests are queued when only one has been started. '
+            'At completion report each requested OUTPUT/token as existing, generated, processing, failed or not submitted, and state the reason for any incomplete output.')
     lines.append(RETRY_SAFE_BATCH_INSTRUCTIONS)
     if config.get('cinematic_previous_frame'):
         lines.append('CONTINUATION FRAME @'+config['cinematic_previous_frame']+': this is the actual final frame of the previous clip. Start from its pose, camera geography, lighting, clothing and props, then progress the narrated action. Do not hold this image for the entire clip. Character references define identity; this frame defines the starting composition.')
@@ -826,12 +906,17 @@ def generate_agent_media(scenes,config,cancel,log,on_media,reference_records=Non
             log(f'Model fallback: {error.model} → {next_model}. Same account, project and references; only unresolved scenes will be submitted.')
             return True
         except MissingAgentOutputs as error:
-            # The collector proves a stable, idle, fully labelled grid first.
-            # Normal Build/Retry should continue a confirmed absent batch too.
-            if not config.get('_generate_missing',True) or start in recovered:raise
+            # A gallery miss is not proof of non-generation. Ordinary Retry
+            # must retain the uncertain submission, never spend another request.
+            if start in recovered:raise
+            missing=[r for r in target if r['status']!='complete']
+            if not explicit_missing_recovery(config):
+                confirmed=audit_missing_outputs(generator,missing,batch_config,cancel,log)
+                if len(confirmed)!=len(missing):
+                    raise RuntimeError('Flow audit did not confirm every unresolved identity as absent and ready. Existing/processing/blocked/uncertain outputs retained; no duplicate batch submitted. Download existing outputs or review agent_missing_audit.json.') from error
+                log('Flow confirmed these exact scene identities are missing: '+', '.join(str(r['index']+1) for r in confirmed)+'. Only these scenes will be requested; saved images skipped.')
             log(str(error))
             recovered.add(start)
-            missing=[r for r in target if r['status']!='complete']
             for r in missing:r['status']='pending'
             save()
             log('Scene outputs not matched after the completed scan: '+', '.join(str(r['index']+1) for r in missing)+

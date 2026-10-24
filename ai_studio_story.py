@@ -24,6 +24,7 @@ MODERN_MIXED_STORY_DIRECTION=(
 )
 PUNJAB_DSP_STYLE='Punjab DSP · village case memoirs (1920–1960)'
 PUNJAB_DSP_COLORMIX_STYLE='Punjab DSP Handpantend ColorMix'
+PUNJAB_DSP_CINEMATIC_STYLE='Punjab DSP · 2D Cinematic Documentary'
 PUNJAB_DSP_DIRECTION=(
     'This is a retired DSP recounting a case from his service in the Punjab region now in Pakistan, between 1920 and 1960. '
     'The off-screen memoir narration is added locally; the visuals show the actual narrated case, not a talking presenter. '
@@ -54,11 +55,11 @@ SILENT_DIRECTION = ('This is an off-screen narrated relationship story. The narr
     'Do not portray a character delivering the narration to the camera. No generated voice-over, music, subtitles, speech bubbles or embedded text.')
 
 def is_narration_story(config):
-    return config.get('style_name') in (STYLE_NAME,MODERN_MIXED_STORY_STYLE,HANDPAINTED_RELATIONSHIP_STYLE,PUNJAB_DSP_STYLE,PUNJAB_DSP_COLORMIX_STYLE,*DOCUMENTARY_STYLES)
+    return config.get('style_name') in (STYLE_NAME,MODERN_MIXED_STORY_STYLE,HANDPAINTED_RELATIONSHIP_STYLE,PUNJAB_DSP_STYLE,PUNJAB_DSP_COLORMIX_STYLE,PUNJAB_DSP_CINEMATIC_STYLE,*DOCUMENTARY_STYLES)
 
 def narration_direction(config):
     if config.get('style_name')==MODERN_MIXED_STORY_STYLE:return MODERN_MIXED_STORY_DIRECTION
-    if config.get('style_name') in (PUNJAB_DSP_STYLE,PUNJAB_DSP_COLORMIX_STYLE):return PUNJAB_DSP_DIRECTION
+    if config.get('style_name') in (PUNJAB_DSP_STYLE,PUNJAB_DSP_COLORMIX_STYLE,PUNJAB_DSP_CINEMATIC_STYLE):return PUNJAB_DSP_DIRECTION
     return DOCUMENTARY_DIRECTION if config.get('style_name') in DOCUMENTARY_STYLES else SILENT_DIRECTION
 
 def can_replan_pending(config,scenes):

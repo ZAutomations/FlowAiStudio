@@ -4,6 +4,7 @@ This module has no GUI or browser dependencies. Image and TTS adapters supply
 assets; the renderer never invents missing assets or silently drops scenes.
 """
 from __future__ import annotations
+
 import hashlib
 import json
 import math
@@ -14,46 +15,128 @@ import subprocess
 import threading
 import time
 from pathlib import Path
-STYLE_PRESETS = {'Colorful stickman · grey background': 'minimalist 2D stickman explainer illustration, light grey and off-white grayscale scenery drawn with fine grey linework, clean bold dark character outlines of consistent thickness, simple round heads, expressive minimal faces, slim stick limbs, bright flat-colored clothing and important props, red blue yellow and green accents reserved for the main characters and story objects, uncluttered composition, consistent character proportions and clothing colors across scenes, no photorealism, no 3D rendering, no embedded text', 'Colorful cartoon · grayscale scenery': '2D hand-drawn cartoon explainer illustration, expressive young adult characters with large readable eyes and consistent head and body proportions, dark clean character outlines, colorful clothing with yellow red blue and green accents, detailed room or street backgrounds rendered exclusively in light grey and off-white with fine grey architectural linework, color reserved for recurring main characters and meaningful props, bright clear visual storytelling, subtle flat cartoon shading, no photorealism, no 3D rendering, no embedded text', 'Cinematic realistic': 'cinematic realistic photography, natural anatomy, soft dramatic lighting, rich detail, cohesive film color grade', 'Documentary': 'documentary photography, authentic environments, natural lighting, realistic people and objects', 'Watercolor': 'hand-painted watercolor illustration, soft paper texture, muted warm colors, delicate brushwork', '3D animation': 'stylized 3D animated film, expressive characters, polished materials, soft cinematic lighting', 'Illustrated story': 'editorial storybook illustration, consistent linework, warm colors, expressive visual storytelling', 'Anime': 'cinematic anime illustration, detailed backgrounds, consistent character design, expressive lighting'}
-TRANSITIONS = {'Cut': None}
+
+STYLE_PRESETS = {
+    'Colorful stickman · grey background': 'minimalist 2D stickman explainer illustration, light grey and off-white grayscale scenery drawn with fine grey linework, clean bold dark character outlines of consistent thickness, simple round heads, expressive minimal faces, slim stick limbs, bright flat-colored clothing and important props, red blue yellow and green accents reserved for the main characters and story objects, uncluttered composition, consistent character proportions and clothing colors across scenes, no photorealism, no 3D rendering, no embedded text',
+    'Colorful cartoon · grayscale scenery': '2D hand-drawn cartoon explainer illustration, expressive young adult characters with large readable eyes and consistent head and body proportions, dark clean character outlines, colorful clothing with yellow red blue and green accents, detailed room or street backgrounds rendered exclusively in light grey and off-white with fine grey architectural linework, color reserved for recurring main characters and meaningful props, bright clear visual storytelling, subtle flat cartoon shading, no photorealism, no 3D rendering, no embedded text',
+    'Cinematic realistic': 'cinematic realistic photography, natural anatomy, soft dramatic lighting, rich detail, cohesive film color grade',
+    'Documentary': 'documentary photography, authentic environments, natural lighting, realistic people and objects',
+    'Watercolor': 'hand-painted watercolor illustration, soft paper texture, muted warm colors, delicate brushwork',
+    '3D animation': 'stylized 3D animated film, expressive characters, polished materials, soft cinematic lighting',
+    'Illustrated story': 'editorial storybook illustration, consistent linework, warm colors, expressive visual storytelling',
+    'Anime': 'cinematic anime illustration, detailed backgrounds, consistent character design, expressive lighting',
+}
+TRANSITIONS = {'Cut': None, 'Dissolve': 'fade', 'Wipe left': 'wipeleft', 'Wipe right': 'wiperight', 'Slide left': 'slideleft', 'Smooth zoom': 'zoomin'}
 from ai_studio_story import STYLE_NAME as NARRATION_STYLE, SILENT_DIRECTION
 STYLE_PRESETS[NARRATION_STYLE] = STYLE_PRESETS['Colorful cartoon · grayscale scenery'] + '. ' + SILENT_DIRECTION
 from ai_studio_story import DOCUMENTARY_STYLE, DOCUMENTARY_DIRECTION
-STYLE_PRESETS[DOCUMENTARY_STYLE] = STYLE_PRESETS['Colorful cartoon · grayscale scenery'].replace('expressive young adult characters with large readable eyes and consistent head and body proportions, dark clean character outlines, colorful clothing with yellow red blue and green accents,', 'clear readable object illustrations and explanatory diagrams, dark clean outlines, yellow red blue and green accents on important objects,').replace('color reserved for recurring main characters and meaningful props', 'color reserved for key objects and meaningful details') + '. ' + DOCUMENTARY_DIRECTION
-from ai_studio_story import HANDPAINTED_DOCUMENTARY_STYLE, HANDPAINTED_RELATIONSHIP_STYLE
-HANDPAINTED_ART = '2D hand-painted storybook illustration on subtly textured off-white watercolor paper, loose confident pencil and dark ink contours with natural uneven hand-drawn linework, soft translucent watercolor washes and colored-pencil detail, gentle warm natural light, expressive readable adult faces with large friendly eyes when people are relevant, consistent proportions, tactile fabric details and tasteful colorful clothing and meaningful props in yellow blue green and red, white and light grey scenery sketched with fine graphite architectural lines and soft grey wash, color reserved for main subjects and meaningful props, delicate paper grain visible through paint, clear topic-specific visual storytelling, no glossy vector finish, no neon glow, no photorealism, no 3D rendering, no embedded text'
-STYLE_PRESETS[HANDPAINTED_RELATIONSHIP_STYLE] = HANDPAINTED_ART + '. ' + SILENT_DIRECTION
-STYLE_PRESETS[HANDPAINTED_DOCUMENTARY_STYLE] = HANDPAINTED_ART + '. ' + DOCUMENTARY_DIRECTION
-from ai_studio_story import PUNJAB_DSP_STYLE, PUNJAB_DSP_DIRECTION
-STYLE_PRESETS[PUNJAB_DSP_STYLE] = '2D hand-painted historical Punjabi village crime-memoir illustration on lightly aged ivory paper, fine graphite and ink contours, textured watercolor washes, expressive natural adult faces, consistent character proportions, lived-in cotton fabric and tactile brick, earth and wood details, warm ochre, faded indigo, muted olive, dusty brown and restrained maroon accents, pale grey and ivory environmental linework with gentle warm washes and soft natural light, quiet investigative atmosphere, grounded village compositions, no glossy modern cartoon finish, no neon, no photorealism, no 3D rendering, no embedded text. ' + PUNJAB_DSP_DIRECTION
+STYLE_PRESETS[DOCUMENTARY_STYLE] = STYLE_PRESETS['Colorful cartoon · grayscale scenery'].replace(
+    'expressive young adult characters with large readable eyes and consistent head and body proportions, dark clean character outlines, colorful clothing with yellow red blue and green accents,',
+    'clear readable object illustrations and explanatory diagrams, dark clean outlines, yellow red blue and green accents on important objects,').replace(
+    'color reserved for recurring main characters and meaningful props','color reserved for key objects and meaningful details') + '. ' + DOCUMENTARY_DIRECTION
+from ai_studio_story import HANDPAINTED_DOCUMENTARY_STYLE,HANDPAINTED_RELATIONSHIP_STYLE
+HANDPAINTED_ART=('2D hand-painted storybook illustration on subtly textured off-white watercolor paper, '
+    'loose confident pencil and dark ink contours with natural uneven hand-drawn linework, '
+    'soft translucent watercolor washes and colored-pencil detail, gentle warm natural light, '
+    'expressive readable adult faces with large friendly eyes when people are relevant, consistent proportions, '
+    'tactile fabric details and tasteful colorful clothing and meaningful props in yellow blue green and red, '
+    'white and light grey scenery sketched with fine graphite architectural lines and soft grey wash, '
+    'color reserved for main subjects and meaningful props, delicate paper grain visible through paint, '
+    'clear topic-specific visual storytelling, no glossy vector finish, no neon glow, no photorealism, '
+    'no 3D rendering, no embedded text')
+STYLE_PRESETS[HANDPAINTED_RELATIONSHIP_STYLE]=HANDPAINTED_ART+'. '+SILENT_DIRECTION
+STYLE_PRESETS[HANDPAINTED_DOCUMENTARY_STYLE]=HANDPAINTED_ART+'. '+DOCUMENTARY_DIRECTION
+from ai_studio_story import PUNJAB_DSP_STYLE,PUNJAB_DSP_DIRECTION
+STYLE_PRESETS[PUNJAB_DSP_STYLE]=(
+    '2D hand-painted historical Punjabi village crime-memoir illustration on lightly aged ivory paper, '
+    'fine graphite and ink contours, textured watercolor washes, expressive natural adult faces, '
+    'consistent character proportions, lived-in cotton fabric and tactile brick, earth and wood details, '
+    'warm ochre, faded indigo, muted olive, dusty brown and restrained maroon accents, '
+    'pale grey and ivory environmental linework with gentle warm washes and soft natural light, '
+    'quiet investigative atmosphere, grounded village compositions, no glossy modern cartoon finish, '
+    'no neon, no photorealism, no 3D rendering, no embedded text. '+PUNJAB_DSP_DIRECTION)
 from ai_studio_story import PUNJAB_DSP_COLORMIX_STYLE
-STYLE_PRESETS[PUNJAB_DSP_COLORMIX_STYLE] = '2D hand-painted historical Punjabi village crime-memoir storybook illustration on subtly textured ivory watercolor paper, loose confident graphite and dark ink contours, soft translucent watercolor washes and colored-pencil fabric detail, expressive natural adult faces and consistent character proportions and identities, gentle warm natural light, retain the authentic 1920–1960 Punjab atmosphere but introduce gentle visible color throughout the scene, homes with warm terracotta brick, cream or pale ochre limewashed walls, faded teal or indigo wooden doors, police uniforms in natural khaki and muted olive with dark brown leather belts and boots, men in softly colored cotton kurtas, shalwars, waistcoats and turbans appropriate to the script, women in period-appropriate muted maroon, mustard, dusty rose, indigo or sage clothing and dupattas, tasteful yellow blue green and red accents, natural skin tones, soft green foliage and warm earthen lanes, preserve each recurring person’s clothing colors across scenes and honor supplied reference identities, keep color restrained and harmonious, with off-white breathing space and fine grey architectural detail, do not make the entire environment monochrome, grey or sepia; avoid oversaturation and neon, tactile cotton, wood, earth and brick, delicate paper texture visible through paint, grounded investigative compositions, no glossy modern cartoon finish, no photorealism, no 3D rendering, no embedded text. ' + PUNJAB_DSP_DIRECTION
-from ai_studio_story import MODERN_MIXED_STORY_STYLE, MODERN_MIXED_STORY_DIRECTION
-STYLE_PRESETS[MODERN_MIXED_STORY_STYLE] = 'contemporary cinematic illustration blending colorful hand-painted watercolor and gouache with hyperrealistic detail, one cohesive painterly-realistic visual language across all scenes, anatomically believable adult characters with realistic facial proportions, natural skin tones and fine facial texture softly integrated with visible brushwork, expressive restrained eyes and authentic body language, rich but balanced jewel-tone and earthy colors, warm amber, deep teal, muted coral, indigo and leafy green accents, fully colored modern interiors and streets, tactile fabric, painted plaster, glass and wood, realistic perspective and material detail, soft cinematic light, natural highlights, subtle depth of field and painterly background edges, delicate canvas or watercolor-paper texture, gentle brush strokes retained on clothing and environments so the result remains an artwork rather than a raw photograph, adapt lighting and mood to the actual scene: warm intimacy, uneasy contrast for betrayal, restrained tension for crime, consistent faces, wardrobe colors and environments across recurring scenes; match approved reference identities, no default grey-only scenery, no antique sepia or aged historical treatment, no exaggerated cartoon eyes, no plastic 3D skin, no glossy game-render appearance, no oversaturated neon, no embedded text. ' + MODERN_MIXED_STORY_DIRECTION
+STYLE_PRESETS[PUNJAB_DSP_COLORMIX_STYLE]=(
+    '2D hand-painted historical Punjabi village crime-memoir storybook illustration on subtly textured ivory watercolor paper, '
+    'loose confident graphite and dark ink contours, soft translucent watercolor washes and colored-pencil fabric detail, '
+    'expressive natural adult faces and consistent character proportions and identities, gentle warm natural light, '
+    'retain the authentic 1920–1960 Punjab atmosphere but introduce gentle visible color throughout the scene, '
+    'homes with warm terracotta brick, cream or pale ochre limewashed walls, faded teal or indigo wooden doors, '
+    'police uniforms in natural khaki and muted olive with dark brown leather belts and boots, '
+    'men in softly colored cotton kurtas, shalwars, waistcoats and turbans appropriate to the script, '
+    'women in period-appropriate muted maroon, mustard, dusty rose, indigo or sage clothing and dupattas, '
+    'tasteful yellow blue green and red accents, natural skin tones, soft green foliage and warm earthen lanes, '
+    'preserve each recurring person’s clothing colors across scenes and honor supplied reference identities, '
+    'keep color restrained and harmonious, with off-white breathing space and fine grey architectural detail, '
+    'do not make the entire environment monochrome, grey or sepia; avoid oversaturation and neon, '
+    'tactile cotton, wood, earth and brick, delicate paper texture visible through paint, grounded investigative compositions, '
+    'no glossy modern cartoon finish, no photorealism, no 3D rendering, no embedded text. '+PUNJAB_DSP_DIRECTION)
+
+from ai_studio_story import PUNJAB_DSP_CINEMATIC_STYLE
+STYLE_PRESETS[PUNJAB_DSP_CINEMATIC_STYLE]=(
+    '2D cinematic documentary illustration of a historical Punjab police case, semi-realistic adult characters, '
+    'natural realistic facial and body proportions, clean controlled hand-drawn digital linework and layered illustrated shading, '
+    'detailed fully colored Punjabi village environments, tactile brick, limewashed plaster, timber and cotton, '
+    'balanced earthy terracotta, cream, muted teal, indigo, olive and restrained maroon colors with natural skin tones, '
+    'soft cinematic directional lighting, readable faces, gentle depth and controlled contrast, serious investigative atmosphere, '
+    'a polished illustrated documentary frame, not a watercolor storybook or a photograph; minimal paper texture, '
+    'choose framing from the current narration: establishing or wide views for new places, medium views for actions, '
+    'close-ups for reactions and detail inserts for a clue only when that clue is actually established in the narration, '
+    'never invent evidence or reveal later discoveries early; one focused composition per still image, '
+    'for animated shots use restrained natural actions and at most one subtle camera movement per shot, '
+    'SERIES POLICE UNIFORM DESIGN: police officers wear a BLACK SHIRT with KHAKI TROUSERS, '
+    'with BLUE AND RED badge/insignia details, dark brown leather belt and period-appropriate footwear; '
+    'do not replace this with an all-khaki or all-black uniform; preserve these exact uniform colors in character reference designs and every scene, '
+    'blue/red details are the supplied series design, not a claim about a specific historical rank or official emblem; '
+    'avoid invented readable badge lettering, modern logos or date-inappropriate national symbols, '
+    'preserve approved reference faces, ages, clothing and location layouts across scenes, '
+    'no exaggerated cartoon eyes, comedy caricature, glossy vector finish, heavy sepia, monochrome scenery, neon, '
+    'photorealism, 3D rendering, collage or embedded text. '+PUNJAB_DSP_DIRECTION)
+
+from ai_studio_story import MODERN_MIXED_STORY_STYLE,MODERN_MIXED_STORY_DIRECTION
+STYLE_PRESETS[MODERN_MIXED_STORY_STYLE]=(
+    'contemporary cinematic illustration blending colorful hand-painted watercolor and gouache with hyperrealistic detail, '
+    'one cohesive painterly-realistic visual language across all scenes, anatomically believable adult characters with realistic facial proportions, '
+    'natural skin tones and fine facial texture softly integrated with visible brushwork, expressive restrained eyes and authentic body language, '
+    'rich but balanced jewel-tone and earthy colors, warm amber, deep teal, muted coral, indigo and leafy green accents, '
+    'fully colored modern interiors and streets, tactile fabric, painted plaster, glass and wood, realistic perspective and material detail, '
+    'soft cinematic light, natural highlights, subtle depth of field and painterly background edges, delicate canvas or watercolor-paper texture, '
+    'gentle brush strokes retained on clothing and environments so the result remains an artwork rather than a raw photograph, '
+    'adapt lighting and mood to the actual scene: warm intimacy, uneasy contrast for betrayal, restrained tension for crime, '
+    'consistent faces, wardrobe colors and environments across recurring scenes; match approved reference identities, '
+    'no default grey-only scenery, no antique sepia or aged historical treatment, no exaggerated cartoon eyes, '
+    'no plastic 3D skin, no glossy game-render appearance, no oversaturated neon, no embedded text. '+MODERN_MIXED_STORY_DIRECTION)
+
+
 
 class Cancelled(RuntimeError):
     pass
+
 
 def check_cancel(cancel):
     if cancel is not None and cancel.is_set():
         raise Cancelled('Stopped. Completed assets are saved; resume when ready.')
 
+
 def fingerprint(*values):
     return hashlib.sha256(json.dumps(values, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
+
 
 def atomic_json(path, data):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + '.tmp')
     tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding='utf-8')
+    # Windows readers (UI polling/preview or antivirus) can briefly hold a
+    # handle that denies replacement. Keep the old checkpoint until it clears.
     for attempt in range(8):
         try:
             os.replace(tmp, path)
             break
         except PermissionError as error:
-            if getattr(error, 'winerror', None) not in (5, 32, 33) or attempt == 7:
-                raise
-            time.sleep(0.05 * (attempt + 1))
+            if getattr(error,'winerror',None) not in (5,32,33) or attempt==7:raise
+            time.sleep(.05*(attempt+1))
+
 
 def split_script(text, max_words=22):
     """Split paragraphs at sentences/clauses, retaining every spoken word.
@@ -67,40 +150,49 @@ def split_script(text, max_words=22):
         line = raw.strip()
         if not line or line.startswith('#') or '-->' in line:
             continue
-        if re.fullmatch('[\\d\\s\\-.]+', line) or re.match('^title\\s*:', line, re.I):
+        if re.fullmatch(r'[\d\s\-.]+', line) or re.match(r'^title\s*:', line, re.I):
             continue
-        visual = re.search('\\[visual:\\s*(.*?)\\]', line, re.I)
-        caption = re.search('\\[caption:\\s*(.*?)\\]', line, re.I)
-        narration = re.sub('\\[(?:visual|caption|emotion):\\s*.*?\\]', '', line, flags=re.I).strip()
-        narration = re.sub('^\\s*(?:CTA)\\s*[:\\-–—]\\s*', '', narration, flags=re.I)
-        narration = re.sub('\\s*\\(\\s*\\d+\\s*(?:words?)?\\s*\\)\\s*$', '', narration, flags=re.I)
+        visual = re.search(r'\[visual:\s*(.*?)\]', line, re.I)
+        caption = re.search(r'\[caption:\s*(.*?)\]', line, re.I)
+        narration = re.sub(r'\[(?:visual|caption|emotion):\s*.*?\]', '', line, flags=re.I).strip()
+        narration = re.sub(r'^\s*(?:CTA)\s*[:\-–—]\s*', '', narration, flags=re.I)
+        narration = re.sub(r'\s*\(\s*\d+\s*(?:words?)?\s*\)\s*$', '', narration, flags=re.I)
         if not narration:
             continue
-        protected = re.sub('\\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|vs|etc|e\\.g|i\\.e)\\.', lambda m: m.group().replace('.', '\ue000'), narration, flags=re.I)
-        sentences = re.split('(?<=[.!?。！？])\\s+|(?<=[;؛])\\s+', protected)
+        protected = re.sub(r'\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|vs|etc|e\.g|i\.e)\.', lambda m: m.group().replace('.', '\ue000'), narration, flags=re.I)
+        sentences = re.split(r'(?<=[.!?。！？])\s+|(?<=[;؛])\s+', protected)
         for sentence in sentences:
             sentence = sentence.replace('\ue000', '.')
             words = sentence.split()
             while words:
                 count = min(max_words, len(words))
+                # Prefer a clause break near the target instead of mid-thought.
                 if len(words) > max_words:
                     breaks = [i + 1 for i, word in enumerate(words[:max_words]) if word.endswith((',', ':', '،')) and i + 1 >= max_words // 2]
                     if breaks:
                         count = breaks[-1]
                 spoken = ' '.join(words[:count])
                 words = words[count:]
-                scene = {'id': fingerprint(line_no, len(scenes), spoken)[:16], 'raw': raw, 'source_line': line_no, 'narration': spoken, 'visual_prompt': visual.group(1).strip() if visual else '', 'caption': caption.group(1).strip() if caption else '', 'image_path': '', 'audio_path': '', 'word_timings': []}
+                scene = {'id': fingerprint(line_no, len(scenes), spoken)[:16], 'raw': raw,
+                         'source_line': line_no, 'narration': spoken,
+                         'visual_prompt': visual.group(1).strip() if visual else '',
+                         'caption': caption.group(1).strip() if caption else '',
+                         'image_path': '', 'audio_path': '', 'word_timings': []}
                 scenes.append(scene)
     return scenes
 
+
 def image_prompt(scene, style, aspect, continuity=''):
-    subject = scene.get('visual_prompt') or 'A concrete visual scene illustrating this narration: ' + scene['narration']
-    parts = ['Generate one finished image, not a description or a storyboard.', subject, 'Visual style: ' + style, 'Composition: ' + aspect + ' aspect ratio.']
+    subject = scene.get('visual_prompt') or (
+        'A concrete visual scene illustrating this narration: ' + scene['narration'])
+    parts = ['Generate one finished image, not a description or a storyboard.',
+             subject, 'Visual style: ' + style, 'Composition: ' + aspect + ' aspect ratio.']
     if continuity.strip():
         parts.append('Keep these characters and setting consistent: ' + continuity.strip())
         parts.append('Character design lock: preserve the same face and head shape, hair silhouette and color, body proportions, line thickness, and exact clothing colors. Change only pose, expression, camera angle and the requested action; do not redesign the characters.')
     parts.append('One scene in this image. No collage, split screen, captions, logos, watermark, or embedded text.')
     return '\n'.join(parts)
+
 
 def valid_image(path):
     try:
@@ -111,6 +203,7 @@ def valid_image(path):
     except (OSError, ValueError, TypeError):
         return False
 
+
 def probe(path):
     result = subprocess.run(['ffprobe', '-v', 'error', '-show_entries', 'format=duration:stream=codec_type,width,height', '-of', 'json', str(path)], capture_output=True, text=True, timeout=30)
     if result.returncode:
@@ -119,18 +212,21 @@ def probe(path):
     duration = float(data.get('format', {}).get('duration', 0))
     if not math.isfinite(duration) or duration <= 0:
         raise RuntimeError('Media has no positive duration: ' + str(path))
-    return (duration, data.get('streams', []))
+    return duration, data.get('streams', [])
+
 
 def valid_audio(path):
     try:
-        return bool(path) and any((s.get('codec_type') == 'audio' for s in probe(path)[1]))
+        return bool(path) and any(s.get('codec_type') == 'audio' for s in probe(path)[1])
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
         return False
+
 
 def run_ffmpeg(args, cancel=None, cwd=None):
     check_cancel(cancel)
     if not shutil.which('ffmpeg') or not shutil.which('ffprobe'):
         raise RuntimeError('FFmpeg and FFprobe must be installed and available on PATH.')
+    # File logging prevents PIPE deadlocks and bounds memory for long renders.
     import tempfile
     with tempfile.TemporaryFile() as log:
         flags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
@@ -152,7 +248,8 @@ def run_ffmpeg(args, cancel=None, cwd=None):
             log.seek(max(0, log.tell() - 4000))
             raise RuntimeError('FFmpeg failed: ' + log.read().decode('utf-8', 'replace'))
 
-def build_timeline(scenes, transition='Cut', transition_seconds=0.4, fps=25):
+
+def build_timeline(scenes, transition='Dissolve', transition_seconds=0.4, fps=25):
     timeline = []
     cursor = 0.0
     durations = []
@@ -160,14 +257,18 @@ def build_timeline(scenes, transition='Cut', transition_seconds=0.4, fps=25):
         if not valid_image(scene.get('image_path', '')):
             raise RuntimeError('Missing or invalid image for: ' + scene.get('narration', '')[:70])
         duration, streams = probe(scene.get('audio_path', ''))
-        if not any((s.get('codec_type') == 'audio' for s in streams)):
+        if not any(s.get('codec_type') == 'audio' for s in streams):
             raise RuntimeError('Voice file has no audio stream.')
         durations.append(duration)
     for i, (scene, duration) in enumerate(zip(scenes, durations)):
         overlap = 0.0
+        if TRANSITIONS.get(transition) and i < len(scenes) - 1:
+            overlap = min(float(transition_seconds), duration / 3, durations[i + 1] / 3)
+            overlap = math.floor(overlap * fps) / fps
         timeline.append({'index': i, 'start': cursor, 'duration': duration, 'end': cursor + duration, 'tail': overlap})
         cursor += duration
     return timeline
+
 
 def timed_words(scene, duration):
     """Use TTS word boundaries where available; label estimated timing otherwise."""
@@ -177,32 +278,35 @@ def timed_words(scene, duration):
             text = str(word.get('word', word.get('text', ''))).strip()
             start = float(word.get('offset', word.get('start', 0)))
             length = float(word.get('duration', float(word.get('end', start)) - start))
-            if text and math.isfinite(start + length) and (length > 0) and (0 <= start < duration):
+            if text and math.isfinite(start + length) and length > 0 and 0 <= start < duration:
                 entries.append({'word': text, 'start': start, 'end': min(duration, start + length)})
         except (TypeError, ValueError):
             continue
     if entries:
-        return (sorted(entries, key=lambda word: word['start']), scene.get('timing_source', 'tts'))
+        return sorted(entries, key=lambda word: word['start']), scene.get('timing_source', 'tts')
     words = scene.get('narration', '').split()
-    weight = sum((max(1, len(word)) for word in words)) or 1
+    weight = sum(max(1, len(word)) for word in words) or 1
     cursor = 0.0
     for word in words:
         end = cursor + duration * max(1, len(word)) / weight
         entries.append({'word': word, 'start': cursor, 'end': end})
         cursor = end
-    return (entries, 'estimated')
+    return entries, 'estimated'
+
 
 def caption_cues(scenes, timeline, words_per_caption=6):
     cues = []
     for scene, shot in zip(scenes, timeline):
         if scene.get('caption'):
+            # Explicit overlays are not substituted for spoken captions.
             words, origin = timed_words(scene, shot['duration'])
         else:
             words, origin = timed_words(scene, shot['duration'])
         for i in range(0, len(words), words_per_caption):
             chunk = words[i:i + words_per_caption]
-            cues.append({'start': shot['start'] + chunk[0]['start'], 'end': shot['start'] + chunk[-1]['end'], 'text': ' '.join((w['word'] for w in chunk)), 'timing': origin, 'words': chunk})
+            cues.append({'start': shot['start'] + chunk[0]['start'], 'end': shot['start'] + chunk[-1]['end'], 'text': ' '.join(w['word'] for w in chunk), 'timing': origin, 'words': chunk})
     return cues
+
 
 def subtitle_time(seconds, ass=False):
     units = 100 if ass else 1000
@@ -212,19 +316,102 @@ def subtitle_time(seconds, ass=False):
     seconds, fraction = divmod(remainder, units)
     return f'{hours}:{minutes:02d}:{seconds:02d}.{fraction:02d}' if ass else f'{hours:02d}:{minutes:02d}:{seconds:02d},{fraction:03d}'
 
+
 def write_subtitles(project, scenes, timeline, width, height, settings):
-    from ai_studio_tab_render import write_pro_captions
-    cues = caption_cues(scenes, timeline, max(1, int(settings.get('caption_words_per_line', 3))))
-    srt = '\n\n'.join((f"{i}\n{subtitle_time(c['start'])} --> {subtitle_time(c['end'])}\n{c['text']}" for i, c in enumerate(cues, 1))) + '\n'
+    cues = caption_cues(scenes, timeline, max(1, min(12, int(settings.get('zb_caption_words', settings.get('caption_words_per_line', 6))))))
+    sync_offset = float(settings.get('caption_sync_offset', 0) or 0)
+    for cue in cues:
+        cue['start'] = max(0, cue['start'] + sync_offset)
+        cue['end'] = max(cue['start'] + .01, min(timeline[-1]['end'], cue['end'] + sync_offset))
+    srt = '\n\n'.join(f'{i}\n{subtitle_time(c["start"])} --> {subtitle_time(c["end"])}\n{c["text"]}' for i, c in enumerate(cues, 1)) + '\n'
     (project / 'captions.srt').write_text(srt, encoding='utf-8')
-    write_pro_captions(project / 'captions.ass', scenes, timeline, width, height, settings)
+    font_size = max(12, int(settings.get('caption_font_size', min(width, height) * 0.052)))
+    highlight = bool(settings.get('caption_highlight_enabled', False))
+    font = str(settings.get('caption_highlight_font_style' if highlight else 'caption_font_style', 'Arial')).replace(',', '').replace('\n', '')
+    # Reuse installed caption fonts and bundle them with the project; no download.
+    try:
+        import caption_fonts
+        font_file = caption_fonts.font_path_for_family(font)
+        if font_file:
+            font_dir = project / 'fonts'
+            font_dir.mkdir(exist_ok=True)
+            shutil.copy2(font_file, font_dir / font_file.name)
+        else:
+            font_file = None
+        if font.lower().endswith(('.ttf', '.otf')):
+            from PIL import ImageFont
+            font = ImageFont.truetype(str(font_file or font), 20).getname()[0]
+    except (ImportError, OSError, ValueError):
+        font = 'Arial'
+    def color(value, alpha=0):
+        value = str(value or '#FFFFFF').lstrip('#')
+        if not re.fullmatch(r'[0-9A-Fa-f]{6}', value):
+            value = 'FFFFFF'
+        return f'&H{alpha:02X}{value[4:6]}{value[2:4]}{value[0:2]}'
+    primary = color(settings.get('caption_highlight_color' if highlight else 'caption_text_color', '#FFFFFF'))
+    secondary = color(settings.get('caption_inactive_color', '#B0B0B0'))
+    outline = color(settings.get('caption_inactive_stroke_color', settings.get('caption_stroke_color', '#000000')))
+    opacity = float(settings.get('caption_bg_opacity', 180))
+    opacity = opacity * 255 if opacity <= 1 else opacity
+    back = color(settings.get('caption_bg_color', '#000000'), max(0, min(255, int(255 - opacity))))
+    border_style = 3 if settings.get('caption_bg_enabled', False) else 1
+    stroke = max(0, min(15, int(settings.get('caption_stroke_width', 2)))) if settings.get('caption_stroke_enabled', True) else 0
+    position = settings.get('caption_position', 'bottom')
+    alignment = 8 if position == 'top' else 5 if position == 'center' else 2
+    margin = max(0, int(height * 0.08) - int(settings.get('caption_y_offset', 0) or 0))
+    header = f'[Script Info]\nScriptType: v4.00+\nPlayResX: {width}\nPlayResY: {height}\nWrapStyle: 0\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,{font},{font_size},{primary},{secondary},{outline},{back},-1,0,0,0,100,100,0,0,{border_style},{stroke},1,{alignment},40,40,{margin},1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n'
+    def safe(text):
+        return text.replace('\\', ' ').replace('{', '(').replace('}', ')').replace('\r', '').replace('\n', '\\N')
+    events = []
+    for cue in cues:
+        case = settings.get('caption_text_case', 'Normal')
+        text = cue['text'].upper() if case == 'ALL CAPS' else cue['text'].title() if case == 'Title Case' else cue['text']
+        if highlight:
+            for active_index, active_word in enumerate(cue['words']):
+                pieces = []
+                for i, word in enumerate(cue['words']):
+                    value = word['word'].upper() if case == 'ALL CAPS' else word['word'].title() if case == 'Title Case' else word['word']
+                    active = i == active_index
+                    word_color = primary if active else secondary
+                    word_outline = color(settings.get('caption_active_stroke_color', '#000000')) if active else outline
+                    pieces.append(f'{{\\1c{word_color}\\3c{word_outline}}}' + safe(value))
+                if settings.get('caption_layout') == '2-line' and len(pieces) > 1:
+                    middle = (len(pieces)+1)//2
+                    text = ' '.join(pieces[:middle]) + '\\N' + ' '.join(pieces[middle:])
+                else:
+                    text = ' '.join(pieces)
+                start = cue['start'] + active_word['start'] - cue['words'][0]['start']
+                end = cue['start'] + (cue['words'][active_index+1]['start'] if active_index+1 < len(cue['words']) else active_word['end']) - cue['words'][0]['start']
+                if start < timeline[-1]['end']:
+                    events.append(f'Dialogue: 0,{subtitle_time(start, True)},{subtitle_time(min(end,timeline[-1]["end"]), True)},Default,,0,0,0,,{text}')
+            continue
+        else:
+            text = safe(text)
+        events.append(f'Dialogue: 0,{subtitle_time(cue["start"], True)},{subtitle_time(cue["end"], True)},Default,,0,0,0,,{text}')
+    for scene, shot in zip(scenes, timeline):
+        if scene.get('caption'):
+            events.append(f'Dialogue: 1,{subtitle_time(shot["start"], True)},{subtitle_time(shot["end"], True)},Default,,0,0,0,,{{\\an8}}{safe(scene["caption"])}')
+    (project / 'captions.ass').write_text(header + '\n'.join(events) + '\n', encoding='utf-8-sig')
+    if settings.get('clipper_captions_enabled'):
+        from ai_studio_tab_render import write_pro_captions
+        write_pro_captions(project / 'captions.ass', scenes, timeline, width, height, settings)
+        headlines = [event for event in events if event.startswith('Dialogue: 1,')]
+        if headlines:
+            with (project / 'captions.ass').open('a', encoding='utf-8') as output:
+                output.write('\n'.join(event.replace('Dialogue: 1,', 'Dialogue: 2,', 1) for event in headlines) + '\n')
+    if settings.get('_zb_use_text_effects'):
+        from ai_studio_tab_render import decorate_caption_effects
+        decorate_caption_effects(project / 'captions.ass', settings, width, height)
     return cues
 
+
 def _concat_file(paths, output):
-    output.write_text('\n'.join(("file '" + Path(p).name.replace("'", "'\\''") + "'" for p in paths)) + '\n', encoding='utf-8')
+    # Relative, controlled render filenames avoid drive-letter and quote parsing.
+    output.write_text('\n'.join("file '" + Path(p).name.replace("'", "'\\''") + "'" for p in paths) + '\n', encoding='utf-8')
+
 
 def render_video(scenes, project, options, cancel=None, progress=None, log=None):
-    """Standalone scene assembly on one continuous narration clock with clean cuts."""
+    """Keep voice/captions on a continuous clock; transitions overlap images only."""
     if options.get('camera_transitions_enabled'):
         from ai_studio_camera_transitions import settings as validate_camera_transitions
         validate_camera_transitions(options)
@@ -233,12 +420,12 @@ def render_video(scenes, project, options, cancel=None, progress=None, log=None)
     progress = progress or (lambda value: None)
     log = log or (lambda message: None)
     from ai_studio_thumbnails import render_scenes
-    scenes = render_scenes(scenes, project, options, cancel)
+    scenes=render_scenes(scenes,project,options,cancel)
     width, height = map(int, options.get('resolution', '1920x1080').split('x'))
     if width <= 0 or height <= 0 or width % 2 or height % 2:
         raise ValueError('Resolution must use positive even dimensions.')
     fps = 25
-    transition = 'Cut'
+    transition = 'Cut' if options.get('camera_transitions_enabled') or options.get('use_transitions_tab') else options.get('transition', 'Dissolve')
     if transition not in TRANSITIONS:
         raise ValueError('Unknown transition: ' + transition)
     timeline = build_timeline(scenes, transition, options.get('transition_seconds', 0.4), fps)
@@ -253,7 +440,9 @@ def render_video(scenes, project, options, cancel=None, progress=None, log=None)
         check_cancel(cancel)
         i = shot['index']
         length = shot['duration'] + shot['tail']
-        frames = max(2, math.ceil(shot['end'] * fps - 1e-07) - math.ceil(shot['start'] * fps - 1e-07))
+        # Cuts share a cumulative frame grid. Rounding each scene separately
+        # accumulates drift and can leave the image track shorter than speech.
+        frames = max(2, math.ceil(shot['end'] * fps - 1e-7) - math.ceil(shot['start'] * fps - 1e-7)) if transition == 'Cut' else max(2, math.ceil(length * fps - 1e-7))
         clip = render_dir / f'shot_{i:04d}.mp4'
         voice = render_dir / f'voice_{i:04d}.wav'
         if options.get('motion', True):
@@ -264,11 +453,12 @@ def render_video(scenes, project, options, cancel=None, progress=None, log=None)
             vf = f'scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},setsar=1,fps={fps}'
             input_args = ['-loop', '1', '-i', scene['image_path']]
         run_ffmpeg(input_args + ['-vf', vf, '-frames:v', str(frames), '-an', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-threads', '2', clip], cancel)
-        run_ffmpeg(['-i', scene['audio_path'], '-af', f"apad,atrim=duration={shot['duration']:.6f},asetpts=PTS-STARTPTS", '-ar', '48000', '-ac', '2', '-c:a', 'pcm_s16le', voice], cancel)
+        run_ffmpeg(['-i', scene['audio_path'], '-af', f'apad,atrim=duration={shot["duration"]:.6f},asetpts=PTS-STARTPTS', '-ar', '48000', '-ac', '2', '-c:a', 'pcm_s16le', voice], cancel)
         voice_files.append(voice)
         segments.append({'path': clip, 'duration': shot['duration'], 'tail': shot['tail']})
         progress(int((i + 1) / len(scenes) * 60))
-        log(f"Scene {i + 1}/{len(scenes)} rendered ({shot['duration']:.2f}s voice).")
+        log(f'Scene {i + 1}/{len(scenes)} rendered ({shot["duration"]:.2f}s voice).')
+    # Join in bounded groups; hundreds of full-size images never enter one graph.
     level = 0
     while len(segments) > 1:
         joined = []
@@ -278,10 +468,28 @@ def render_video(scenes, project, options, cancel=None, progress=None, log=None)
                 joined.append(group[0])
                 continue
             out = render_dir / f'join_{level}_{group_index:04d}.mp4'
-            listing = render_dir / f'join_{level}_{group_index:04d}.txt'
-            _concat_file([s['path'] for s in group], listing)
-            run_ffmpeg(['-f', 'concat', '-safe', '0', '-i', listing.name, '-an', '-c:v', 'copy', out], cancel, cwd=render_dir)
-            joined.append({'path': out, 'duration': sum((s['duration'] for s in group)), 'tail': group[-1]['tail']})
+            if transition == 'Cut' or not any(s['tail'] for s in group[:-1]):
+                listing = render_dir / f'join_{level}_{group_index:04d}.txt'
+                _concat_file([s['path'] for s in group], listing)
+                run_ffmpeg(['-f', 'concat', '-safe', '0', '-i', listing.name, '-an', '-c:v', 'copy', out], cancel, cwd=render_dir)
+            else:
+                args = []
+                graph = []
+                for j, segment in enumerate(group):
+                    args += ['-i', segment['path']]
+                    graph.append(f'[{j}:v]fps={fps},settb=AVTB,setpts=PTS-STARTPTS,format=yuv420p[v{j}]')
+                label = 'v0'
+                offset = 0.0
+                for j in range(1, len(group)):
+                    offset += group[j - 1]['duration']
+                    tail = group[j - 1]['tail']
+                    if tail <= 0:
+                        graph.append(f'[{label}][v{j}]concat=n=2:v=1:a=0[x{j}]')
+                    else:
+                        graph.append(f'[{label}][v{j}]xfade=transition={TRANSITIONS[transition]}:duration={tail:.6f}:offset={offset:.6f}[x{j}]')
+                    label = f'x{j}'
+                run_ffmpeg(args + ['-filter_complex_threads', '1', '-filter_complex', ';'.join(graph), '-map', f'[{label}]', '-an', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-threads', '2', out], cancel)
+            joined.append({'path': out, 'duration': sum(s['duration'] for s in group), 'tail': group[-1]['tail']})
         segments = joined
         level += 1
     listing = render_dir / 'voice_concat.txt'
@@ -291,17 +499,21 @@ def render_video(scenes, project, options, cancel=None, progress=None, log=None)
     visual_source = segments[0]['path']
     sfx = None
     settings = dict(options.get('settings', {}))
-    from ai_studio_tab_render import captions_enabled
-    use_transitions = False
-    use_effects = False
+    from ai_studio_tab_render import TRANSITION_KEYS, captions_enabled, has_frame_effects
+    use_transitions = bool(options.get('use_transitions_tab')) and not options.get('camera_transitions_enabled')
+    use_effects = bool(options.get('use_effects_tab'))
+    if (use_transitions and any(settings.get(k) for k in TRANSITION_KEYS)) or (use_effects and has_frame_effects(settings)):
+        from ai_studio_tab_render import render_tab_visuals
+        visual_source, sfx = render_tab_visuals(visual_source, render_dir / 'tab_visuals.mp4', timeline,
+                                              settings, use_transitions, use_effects, cancel, progress, log)
     from ai_studio_camera_transitions import apply as apply_camera_transitions
     visual_source, sfx = apply_camera_transitions(visual_source, timeline, options, cancel, log, sfx)
     progress(80)
     settings['_zb_use_text_effects'] = use_effects
     cues = write_subtitles(project, scenes, timeline, width, height, settings)
-    generated_thumbnail_duration = sum((shot['duration'] for scene, shot in zip(scenes, timeline) if scene.get('is_thumbnail')))
-    narration_duration = total_duration - generated_thumbnail_duration
-    thumbnail_duration = max(0.1, min(30, float(settings.get('thumbnail_frame_duration', 3)))) if use_effects and settings.get('add_thumbnail_frame') else 0
+    generated_thumbnail_duration=sum(shot['duration'] for scene,shot in zip(scenes,timeline) if scene.get('is_thumbnail'))
+    narration_duration = total_duration-generated_thumbnail_duration
+    thumbnail_duration = max(.1, min(30, float(settings.get('thumbnail_frame_duration',3)))) if use_effects and settings.get('add_thumbnail_frame') else 0
     total_duration += thumbnail_duration
     args = ['-i', visual_source, '-i', narration]
     bgm = options.get('bgm_file')
@@ -332,7 +544,7 @@ def render_video(scenes, project, options, cancel=None, progress=None, log=None)
     log('Final export: burning captions and mixing audio…' if want_captions else 'Final export: attaching audio without re-encoding images…')
     final_started = time.perf_counter()
     run_ffmpeg(args, cancel, cwd=project)
-    log(f'Final export finished in {time.perf_counter() - final_started:.1f}s.')
+    log(f'Final export finished in {time.perf_counter()-final_started:.1f}s.')
     duration, streams = probe(temporary)
     if not {'audio', 'video'}.issubset({s.get('codec_type') for s in streams}):
         raise RuntimeError('Rendered file is missing video or narration.')
@@ -340,6 +552,8 @@ def render_video(scenes, project, options, cancel=None, progress=None, log=None)
         raise RuntimeError(f'Render duration mismatch: voice {total_duration:.3f}s, video {duration:.3f}s')
     os.replace(temporary, final)
     from ai_studio_tab_render import tab_settings_snapshot
-    atomic_json(project / 'timeline.json', {'duration': total_duration, 'narration_duration': narration_duration, 'thumbnail_duration': thumbnail_duration, 'generated_thumbnail_duration': generated_thumbnail_duration, 'scenes': timeline, 'captions': cues, 'captions_burned': bool(want_captions), 'transition': transition, 'resolution': [width, height], 'use_transitions_tab': use_transitions, 'use_effects_tab': use_effects, 'render_tab_settings': tab_settings_snapshot(settings)})
+    atomic_json(project / 'timeline.json', {'duration': total_duration, 'narration_duration': narration_duration, 'thumbnail_duration': thumbnail_duration,'generated_thumbnail_duration':generated_thumbnail_duration, 'scenes': timeline, 'captions': cues, 'captions_burned': bool(want_captions), 'transition': transition, 'resolution': [width, height],
+                'use_transitions_tab': use_transitions, 'use_effects_tab': use_effects,
+                'render_tab_settings': tab_settings_snapshot(settings)})
     progress(100)
     return final

@@ -89,7 +89,7 @@ def generate(adapter,q,config,recover_only=False,references_only=False):
     from ai_studio_image_models import ImageModelsExhausted
     while True:
         try:
-            generate_agent_media(adapter.zb_scenes,{**config,'_generate_missing':not recover_only,'_recover_only':recover_only},adapter._zb_cancel,log,media)
+            generate_agent_media(adapter.zb_scenes,{**config,'_generate_missing':config.get('_generate_missing') is True and not recover_only,'_recover_only':recover_only},adapter._zb_cancel,log,media)
             break
         except ImageModelsExhausted:
             if recover_only:raise

@@ -855,6 +855,22 @@ def _call_gemini_tts(
     else:
         return False, b"", "No API key or service account provided"
 
+    if model_id in ('gemini-3.1-flash-tts-preview','gemini-2.5-flash-preview-tts','gemini-2.5-pro-preview-tts'):
+        url = f"{API_BASE}/models/{model_id}:generateContent"
+        if api_key and 'Authorization' not in headers: headers['x-goog-api-key'] = api_key
+        payload = {
+            'contents':[{'parts':[{'text':(prompt+'\n\nRead only this narration:\n' if prompt else '')+text}]}],
+            'generationConfig':{'responseModalities':['AUDIO'],'speechConfig':{'voiceConfig':{'prebuiltVoiceConfig':{'voiceName':voice}}}}
+        }
+        ok,data,err=_http_post(url,payload,headers,timeout)
+        if not ok:return False,b'',err
+        for candidate in data.get('candidates',[]):
+            for part in candidate.get('content',{}).get('parts',[]):
+                inline=part.get('inlineData',{})
+                if inline.get('mimeType','').startswith('audio/') and inline.get('data'):
+                    return True,base64.b64decode(inline['data']),''
+        return False,b'','No audio returned by Gemini Developer API'
+
     payload: dict[str, Any] = {
         "model": model_id,
         "input": ((prompt+'\n\nSpeak only the following narration verbatim; do not read the delivery directions:\n'+text) if prompt else text),
@@ -940,6 +956,15 @@ def generate_speech(
     api_key = (s.get("gemini_api_key") or "").strip()
     sa_path = (s.get("service_account_path") or "").strip()
     use_cloud = s.get("use_cloud_tts", False)
+    route = s.get('gemini_tts_route','auto')
+    if route not in ('auto','developer','cloud'):return False,['Choose a supported Gemini TTS route']
+    if route == 'developer':
+        sa_path = ''  # Keep the saved service-account setting intact; never use paid Cloud as fallback.
+        use_cloud = False
+        if not api_key:return False,['Gemini Developer API requires a saved API key']
+    elif route == 'cloud' and not sa_path:
+        return False,['Cloud route requires the saved service account']
+
 
     voice = s.get("gemini_tts_voice", "Achernar") if not use_cloud \
             else s.get("cloud_tts_voice", "en-US-Studio-Q")

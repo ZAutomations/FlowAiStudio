@@ -206,6 +206,9 @@ class AIStudioWorkflowMixin:
                 q.put(('progress', int((n + 1) / len(pending) * 100)))
 
     def _zb_voice_pass(self, q, config):
+        if config.get("audio_source")=="existing":
+            from ai_studio_existing_audio import generate
+            return generate(self,q,config)
         from studio_voice import TTSGenerator
         if config.get('narration_mode') == 'continuous' and config.get('workflow') != 'animate':
             from ai_studio_continuous_voice import generate
@@ -263,7 +266,9 @@ class AIStudioWorkflowMixin:
             q.put(('log', 'success', f'Scene {i + 1}: voice saved ({locked_engine}).'))
 
     def _zb_render_pass(self, q, config):
-        if config.get('narration_mode') == 'continuous' and any(s.get('timing_source') != 'continuous-aligned' for s in self.zb_scenes):
+        if config.get('audio_source')=='existing' and any(s.get('timing_source') not in (('existing-audio-aligned','continuous-aligned') if config.get('animate_narration_mode')=='cinematic' else ('existing-audio-aligned',)) for s in self.zb_scenes):
+            raise RuntimeError('Align Existing Audio + Script before rendering. Saved media retained.')
+        if config.get('audio_source')!='existing' and config.get('narration_mode') == 'continuous' and any(s.get('timing_source') != 'continuous-aligned' for s in self.zb_scenes):
             raise RuntimeError('Generate Voice in Continuous Narration mode before rendering. Existing scene audio and images are retained.')
         self.zb_last_video = None
         self.zb_last_video = str(render_video(self.zb_scenes, config['project'], config, self._zb_cancel, progress=lambda n: q.put(('progress', n)), log=lambda msg: q.put(('log', 'info', msg))))

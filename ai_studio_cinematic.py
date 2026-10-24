@@ -182,6 +182,9 @@ def prepare(adapter,q,config,tts,recognize=transcribe):
     identity=fingerprint('cinematic-v1',config['script'],public_voice,config['voice_engine'],config['style'],
         config.get('continuity',''),config.get('reference_design',''),config.get('character_names',''),config.get('place_name',''),
         config.get('animation_mode','partial'),config.get('partial_animation_unit','scenes'),config.get('animate_count',3),config.get('animate_seconds',80))
+    if config.get("audio_source")=="existing":
+        from ai_studio_existing_audio import audio_hash
+        identity=fingerprint(identity,"existing-audio",audio_hash(config.get("existing_audio_path")))
     legacy_identity=identity
     if config.get('cinematic_ready_prompts'):legacy_identity=fingerprint(legacy_identity,'ready-source-prompts-v1',legacy_source)
     if config.get('character_consistency'):identity=fingerprint(identity,'full-cast-v1',config['cast_assets'],config['scene_reference_map'])

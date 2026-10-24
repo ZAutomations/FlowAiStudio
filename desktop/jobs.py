@@ -92,7 +92,9 @@ class Jobs:
             job = self._find(job_id)
             if job is None:
                 raise ValueError('Job not found')
+            job['retry_disabled']=True
             if job['state'] in TERMINAL:
+                self._save()
                 return
             if job['state'] == 'queued':
                 job.update(state='stopped', message='Removed from queue')
@@ -122,7 +124,8 @@ class Jobs:
                 running = [j for j in self.items if j['state'] in ('running', 'stopping')]
                 changed = False
                 for job in self.items:
-                    if job['state'] == 'queued' and not any(self.conflicts(job, j) for j in running):
+                    if job['state'] == 'queued' and time.time()>=job.get('retry_at',0) and not any(self.conflicts(job, j) for j in running):
+                        job.pop('retry_at',None)
                         job.update(state='running', message='Starting engine',started=time.time())
                         running.append(job)
                         threading.Thread(target=self._run, args=(job,), daemon=True).start()
@@ -201,6 +204,10 @@ class Jobs:
         finally:
             with self.lock:
                 self.processes.pop(job['id'], None)
+                from .job_automation import schedule_retry
+                if schedule_retry(job,self.closed):
+                    job['logs'].append(timestamped_log('[INFO] '+job['message']))
+                    job['logs']=job['logs'][-500:]
                 self._save()
 
     def _force_stop(self, job_id):

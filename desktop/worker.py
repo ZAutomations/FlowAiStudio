@@ -131,6 +131,8 @@ def studio(payload, settings, cancel, animated=False, emit=event):
         remember_existing(config,options)
     from ai_studio_narration import validate as validate_narration
     validate_narration(config)
+    if config.get("audio_source","tts") not in ("tts","existing"):raise ValueError("Choose existing TTS or imported audio workflow")
+    if animated and config.get("audio_source")=="existing" and config.get("animate_narration_mode")!="cinematic":raise ValueError("Imported audio in Animate requires Narration-first cinematic mode")
     if not animated:
         from ai_studio_image_models import preferred
         preferred(config)
@@ -245,8 +247,19 @@ def studio(payload, settings, cancel, animated=False, emit=event):
         adapter._zb_start_worker = lambda work: work(q)
         adapter._zb_generate_package()
     phases.update(package=[package], save=[], edit=[])
-    if not animated and config.get('narration_mode') == 'continuous':
+    if not animated:
+        def studio_generate_missing(q,c):
+            if c.get('provider')!='flow' or not c.get('character_consistency'):
+                raise ValueError('Generate Missing recovery requires Flow with reviewed character/location consistency.')
+            adapter._zb_fill_prompts(q,c)
+            if c.get('audio_source')=='existing':adapter._zb_voice_pass(q,c)
+            adapter._zb_images_pass(q,{**c,'_generate_missing':True})
+        phases['generate-missing']=[studio_generate_missing]
+
+    if not animated and (config.get('narration_mode') == 'continuous' or config.get('audio_source')=='existing'):
         phases['build']=[adapter._zb_fill_prompts,adapter._zb_voice_pass,adapter._zb_images_pass,adapter._zb_render_pass]
+    if not animated and config.get('audio_source')=='existing':
+        phases['images']=[adapter._zb_fill_prompts,adapter._zb_voice_pass,adapter._zb_images_pass]
     if animated:
         phases['import-ready-animation'] = []
         from ai_studio_continuity_ledger import build as build_ledger,save_review as save_ledger
@@ -356,6 +369,14 @@ def studio(payload, settings, cancel, animated=False, emit=event):
             phase(q, config)
             if animated and phase == adapter._zb_voice_pass:adapter._opening_voice_ready=True
             print(f"[INFO] {phase.__name__.replace('_zb_', '').replace('_', ' ')} finished in {time.monotonic() - started:.1f}s.", flush=True)
+        from .job_automation import should_compile,verify_part_media
+        if should_compile(config,review_required):
+            first,last=verify_part_media(adapter.zb_scenes,config,animated)
+            check_cancel(cancel)
+            print(f'[INFO] Auto compile: all selected media files {first}–{last} verified. Starting Compile Selected Part.',flush=True)
+            event(message='Auto compile selected part')
+            from ai_studio_parts import compile_part
+            compile_part(adapter,q,config,animated=animated)
         if action == 'export':
             if not adapter.zb_last_video or not Path(adapter.zb_last_video).is_file():
                 raise ValueError('Render this project before exporting')

@@ -3,7 +3,7 @@ import copy
 from pathlib import Path
 from .storage import ROOT, read, atomic, public
 
-PRESET_KEYS = ('continuity_ledger_enabled','animate_narration_mode','narration_alignment_model','animation_mode','animate_count','partial_animation_unit','animate_seconds','animate_clip_seconds','animate_multishot','animate_model','animate_video_resolution','animate_video_aspect','animate_video_batch_size','auto_project','auto_reference','reference_mode',
+PRESET_KEYS = ('audio_source','existing_audio_path','continuity_ledger_enabled','animate_narration_mode','narration_alignment_model','animation_mode','animate_count','partial_animation_unit','animate_seconds','animate_clip_seconds','animate_multishot','animate_model','animate_video_resolution','animate_video_aspect','animate_video_batch_size','auto_project','auto_reference','reference_mode',
                'character_consistency','auto_cast','main_character_references','dsp_malik_reference_path','character_names','place_name','reference_design','reference_files',
                'style_name','custom_style','continuity','resolution','narration_style','narration_direction')
 
@@ -92,7 +92,7 @@ def new_project(payload, settings, cancel, emit):
         config.update({k:options[k] for k in ('style_name','custom_style','continuity','resolution') if k in options})
         config['custom_style']=config.get('custom_style','')
     if payload['action']=='new':
-        config.update(scene_start=1,scene_end='',script='',scene_seed=[],package_seed={},references=[],reference_files='',scene_reference_map=None)
+        config.update(audio_source='tts',existing_audio_path='',scene_start=1,scene_end='',script='',scene_seed=[],package_seed={},references=[],reference_files='',scene_reference_map=None)
         for key in ('planning_source','cinematic_ready_prompts','ready_animation_script_key','cast_assets','reference_descriptions','thumbnail_paths','last_video','animation_ready','animation_video_ready','animation_image_ready'):
             config.pop(key,None)
     config.pop('animate_source',None)

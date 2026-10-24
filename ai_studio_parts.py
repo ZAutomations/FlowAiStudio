@@ -54,7 +54,7 @@ def compile_part(adapter,q,config,animated=False):
                 if not out.exists() or out.stat().st_size!=video.stat().st_size:shutil.copy2(video,out)
                 row['video_path']=str(out)
         local=next((r for r in previous.get('scenes',[]) if r.get('source_scene_number')==i and r['narration']==row['narration']),None)
-        if local:
+        if local and (config.get('audio_source')!='existing' or local.get('audio_key')==scene.get('audio_key')):
             for key in ('audio_path','audio_key','audio_status','voice_engine','word_timings','timing_source'):
                 if key in local:
                     value=local[key]
@@ -77,7 +77,7 @@ def compile_part(adapter,q,config,animated=False):
         adapter.zb_scenes=scenes;adapter.zb_last_video=None
         adapter._zb_save_project(child)
         q.put(('log','info',f'Compiling scenes {start+1}–{end} only. Copied images into {folder}; generating narration, then rendering.'))
-        if animated and config.get('animate_narration_mode')=='cinematic':
+        if config.get('audio_source')=='existing' or (animated and config.get('animate_narration_mode')=='cinematic'):
             from ai_studio_pipeline import valid_audio
             if any(not valid_audio(s.get('audio_path','')) for s in scenes):
                 raise ValueError('Prepare continuous narration and cinematic plan before compiling a part. Saved media retained.')

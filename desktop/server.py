@@ -168,6 +168,20 @@ def create_app(store=None, jobs=None, token=None):
                 continue
         return {'references': previews, 'expected': inventory['expected'], 'missing': inventory['missing']}
 
+    @app.post('/api/studio/audio-boundaries')
+    def audio_boundaries(body:dict):
+        from ai_studio_audio_review import review_data,save_review,preview
+        project=Path(body.get('project','')).expanduser().resolve()
+        if not (project/'project.json').is_file():raise ValueError('Open a saved story project first')
+        action=body.get('action','read')
+        if action=='read':return {'review':review_data(project)}
+        if action=='preview':return preview(project,int(body.get('boundary',0)))
+        if action=='save':
+            if any(j.get('state') in ('running','queued','stopping') and Path(j.get('payload',{}).get('project','')).resolve()==project for j in jobs.items):
+                raise ValueError('Finish or stop the project job before saving boundary corrections.')
+            return save_review(project,body.get('corrections'))
+        raise ValueError('Unknown audio review action')
+
     @app.get('/api/prompt-guide')
     def prompt_guide():
         from .prompt_guide import content

@@ -25,7 +25,7 @@ def metadata(settings, root=ROOT):
         'share_google_profile':settings.get('zb_flow_share_google_profile',True), 'show_browser':settings.get('zb_show_browser',True),
         'output_dir':settings.get('output_dir',settings.get('output_folder','FinalVideos')),
         'flow_url':settings.get('zb_flow_project_url',''), 'auto_project':True,'agent_tool_dir':str(root/'animate_flow_backend'),
-        'narration_style':'auto','narration_direction':'',
+        'audio_source':'tts','existing_audio_path':'','narration_style':'auto','narration_direction':'',
         'character_consistency':False,'auto_cast':True,'character_names':'DSP, HelpingPoliceman','place_name':'PoliceStation','reference_design':'','reference_files':'',
         'bgm':bool(settings.get('bgm_file')), 'fallback':True, 'motion':True,'thumbnail_enabled':True,'thumbnail_count':1,
         'use_captions_tab':settings.get('zb_captions',True),'use_transitions_tab':False,'use_effects_tab':False}

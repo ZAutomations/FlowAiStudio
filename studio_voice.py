@@ -398,7 +398,7 @@ class TTSGenerator:
             print('[WARNING] Gemini API TTS: empty text')
             return (False, [])
         wav_path = output_path.with_suffix('.wav')
-        success, word_timings = _gtts.generate_speech(text, str(wav_path), {'gemini_api_key': settings.get('gemini_api_key', ''), 'gemini_tts_voice': settings.get('gemini_tts_voice', 'Zephyr'), 'gemini_tts_model': settings.get('gemini_tts_model') or 'gemini-2.5-flash-tts', 'gemini_tts_speed': settings.get('gemini_tts_speed', 1.0), 'gemini_tts_prompt': settings.get('gemini_tts_prompt', ''), 'gemini_tts_language': settings.get('gemini_tts_language', 'en-US'), 'service_account_path': settings.get('service_account_path', ''), 'use_cloud_tts': settings.get('use_cloud_tts', False), 'cloud_tts_voice': settings.get('cloud_tts_voice', settings.get('gemini_tts_voice', 'en-US-Studio-Q'))})
+        success, word_timings = _gtts.generate_speech(text, str(wav_path), {'gemini_api_key': settings.get('gemini_api_key', ''), 'gemini_tts_route': settings.get('gemini_tts_route','auto'), 'gemini_tts_voice': settings.get('gemini_tts_voice', 'Zephyr'), 'gemini_tts_model': settings.get('gemini_tts_model') or 'gemini-2.5-flash-tts', 'gemini_tts_speed': settings.get('gemini_tts_speed', 1.0), 'gemini_tts_prompt': settings.get('gemini_tts_prompt', ''), 'gemini_tts_language': settings.get('gemini_tts_language', 'en-US'), 'service_account_path': settings.get('service_account_path', ''), 'use_cloud_tts': settings.get('use_cloud_tts', False), 'cloud_tts_voice': settings.get('cloud_tts_voice', settings.get('gemini_tts_voice', 'en-US-Studio-Q'))})
         if not success:
             reason = ''
             if word_timings and isinstance(word_timings[0], str):

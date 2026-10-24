@@ -22,8 +22,8 @@ def resolve(config):
     validate(config)
     selected=config.get('narration_style','original')
     if selected!='auto':return selected
-    from ai_studio_story import PUNJAB_DSP_STYLE,PUNJAB_DSP_COLORMIX_STYLE
-    if config.get('style_name') in (PUNJAB_DSP_STYLE,PUNJAB_DSP_COLORMIX_STYLE):return 'dsp_memoir'
+    from ai_studio_story import PUNJAB_DSP_STYLE,PUNJAB_DSP_COLORMIX_STYLE,PUNJAB_DSP_CINEMATIC_STYLE
+    if config.get('style_name') in (PUNJAB_DSP_STYLE,PUNJAB_DSP_COLORMIX_STYLE,PUNJAB_DSP_CINEMATIC_STYLE):return 'dsp_memoir'
     # Explicit content genres win over a visual rendering technique.
     topic=(str(config.get('title',''))+' '+str(config.get('script',''))).lower()
     if re.search(r'\b(horror|haunted|ghost|terrifying|demonic)\b',topic):return 'horror'

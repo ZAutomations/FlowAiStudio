@@ -154,6 +154,9 @@ def transcribe(path, model, cancel, language=None):
 
 
 def generate(adapter, q, config, tts, recognize=transcribe):
+    if config.get("audio_source")=="existing":
+        from ai_studio_existing_audio import generate as imported
+        return imported(adapter,q,config,recognize)
     scenes = adapter.zb_scenes
     if not scenes: raise ValueError('Parse scenes first.')
     if any(scene.get('is_thumbnail') for scene in scenes):
