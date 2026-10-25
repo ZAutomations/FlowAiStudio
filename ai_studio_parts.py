@@ -3,7 +3,7 @@ import copy
 import json
 import shutil
 from pathlib import Path
-from ai_studio_pipeline import atomic_json, check_cancel, fingerprint, valid_image
+from ai_studio_pipeline import atomic_json, check_cancel, fingerprint, valid_image, valid_audio
 
 
 def scene_range(config,count):
@@ -54,12 +54,18 @@ def compile_part(adapter,q,config,animated=False):
                 if not out.exists() or out.stat().st_size!=video.stat().st_size:shutil.copy2(video,out)
                 row['video_path']=str(out)
         local=next((r for r in previous.get('scenes',[]) if r.get('source_scene_number')==i and r['narration']==row['narration']),None)
-        if local and (config.get('audio_source')!='existing' or local.get('audio_key')==scene.get('audio_key')):
+        if local and not valid_audio(row.get('audio_path','')) and (not scene.get('audio_key') or local.get('audio_key')==scene.get('audio_key')):
             for key in ('audio_path','audio_key','audio_status','voice_engine','word_timings','timing_source'):
                 if key in local:
                     value=local[key]
                     if key=='audio_path' and value and not Path(value).is_absolute():value=str(folder/value)
                     row[key]=value
+        if valid_audio(row.get('audio_path','')):
+            source_audio=Path(row['audio_path'])
+            audio_target=folder/'voice'/f'source_{i:04d}{source_audio.suffix}'
+            if source_audio.resolve()!=audio_target.resolve() and (not audio_target.exists() or audio_target.read_bytes()!=source_audio.read_bytes()):
+                shutil.copy2(source_audio,audio_target)
+            row['audio_path']=str(audio_target)
         scenes.append(row)
     atomic_json(checkpoint,{'identity':identity,'source_project':str(root),'start':start+1,'end':end})
     child={**config,'project':str(folder),'title':f'{config["title"]} — scenes {start+1}–{end}',
@@ -76,11 +82,12 @@ def compile_part(adapter,q,config,animated=False):
     try:
         adapter.zb_scenes=scenes;adapter.zb_last_video=None
         adapter._zb_save_project(child)
-        q.put(('log','info',f'Compiling scenes {start+1}–{end} only. Copied images into {folder}; generating narration, then rendering.'))
-        if config.get('audio_source')=='existing' or (animated and config.get('animate_narration_mode')=='cinematic'):
-            from ai_studio_pipeline import valid_audio
+        q.put(('log','info',f'Compiling scenes {start+1}–{end} only. Copied media into {folder}; checking saved narration before rendering.'))
+        if all(valid_audio(s.get('audio_path','')) for s in scenes):
+            q.put(('log','info','Reusing all saved scene narration and timing; no TTS request or alignment.'))
+        elif config.get('audio_source')=='existing' or config.get('narration_mode')=='continuous' or (animated and config.get('animate_narration_mode')=='cinematic'):
             if any(not valid_audio(s.get('audio_path','')) for s in scenes):
-                raise ValueError('Prepare continuous narration and cinematic plan before compiling a part. Saved media retained.')
+                raise ValueError('Selected part has missing/invalid saved audio. Prepare narration in the full story first, then compile again; saved audio and media are retained.')
             q.put(('log','info','Reusing measured continuous narration; no replanning or new Gemini analysis.'))
         else:
             adapter._zb_voice_pass(q,child)

@@ -87,6 +87,21 @@ class PartTests(unittest.TestCase):
         self.assertEqual(options['partial_animation_unit'],'scenes')
         self.assertIs(self.adapter.zb_scenes,self.scenes)
 
+    def test_continuous_part_reuses_parent_audio_over_stale_child(self):
+        (self.root/'voice').mkdir()
+        self.adapter._zb_voice_pass(self.q,self.config)
+        self.config['narration_mode']='continuous'
+        folder=self.root/'parts/part_0002-0003';folder.mkdir(parents=True)
+        atomic_json(folder/'project.json',{'scenes':[dict(self.scenes[1],source_scene_number=2,audio_path='missing.wav',audio_key='stale')]})
+        self.adapter._zb_voice_pass=Mock(side_effect=AssertionError('No API calls allowed'))
+        self.adapter._zb_render_pass=Mock()
+        result=compile_part(self.adapter,self.q,self.config)
+        self.adapter._zb_voice_pass.assert_not_called()
+        child=json.loads(Path(result['project']).read_text('utf-8'))
+        for row in child['scenes']:
+            self.assertTrue(Path(row['audio_path']).is_file())
+            self.assertIn('source_',Path(row['audio_path']).name)
+
     def test_cinematic_part_reuses_audio_without_planning(self):
         (self.root/'voice').mkdir()
         self.adapter._zb_voice_pass(self.q,self.config)
