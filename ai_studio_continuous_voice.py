@@ -138,13 +138,26 @@ def speech_model(model,device='auto'):
     return recognizer
 
 
-def transcribe(path, model, cancel, language=None):
+def transcribe(path, model, cancel, language=None, progress=None):
     def recognize(recognizer):
-        segments,_=recognizer.transcribe(str(path),language=language,word_timestamps=True,beam_size=5,vad_filter=True)
+        segments,info=recognizer.transcribe(str(path),language=language,word_timestamps=True,beam_size=5,vad_filter=True)
+        duration=float(getattr(info,'duration',0) or 0)
+        last_report=0.0
         words=[]
         for segment in segments:
             check_cancel(cancel)
             for word in segment.words or []:words.append({'word':word.word,'offset':word.start,'duration':word.end-word.start})
+            elapsed=time.monotonic()
+            if elapsed-last_report>=10:
+                done=max(0,min(float(segment.end),duration)) if duration else float(segment.end)
+                message=f'Speech alignment {model}: {done/60:.1f} / {duration/60:.1f} audio minutes processed'
+                if duration:message+=f' ({min(99,int(done/duration*100))}% of recognition pass)'
+                print('[INFO] '+message,flush=True)
+                if progress:progress(done,duration,message)
+                last_report=elapsed
+        message=f'Speech alignment {model}: recognition complete; checking script coverage and scene boundaries.'
+        print('[INFO] '+message,flush=True)
+        if progress:progress(duration,duration,message)
         return words
     try:return recognize(speech_model(model))
     except RuntimeError as error:

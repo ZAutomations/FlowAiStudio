@@ -75,17 +75,25 @@ def generate(adapter,q,config,recognize=None):
         try:verify_coverage(scenes,candidate);qualified.append(candidate)
         except ValueError:pass
     if not qualified:
+        def recognition_progress(done,total,message):
+            # Recognition is only part of alignment; reserve completion for
+            # verified boundaries and saved scene audio, not ASR alone.
+            if total>0:q.put(('progress',min(85,int(done/total*85))))
+            q.put(('status',message))
         for name in ['base','small','medium'][['base','small','medium'].index(model):]:
             check_cancel(adapter._zb_cancel)
             file=root/f'words_{name}.json'
             if file.exists():words=json.loads(file.read_text('utf-8'))['words']
             else:
                 q.put(('log','info',f'Checking full recording/script coverage with {name} ({duration:.1f}s); subsequent boundary repairs use short segments only.'))
-                words=recognize(pcm,name,adapter._zb_cancel,language=language) if recognize is transcribe else recognize(pcm,name,adapter._zb_cancel)
+                q.put(('status',f'Loading {name} alignment model; waiting for the first recognized segment.'))
+                q.put(('progress',0))
+                words=recognize(pcm,name,adapter._zb_cancel,language=language,progress=recognition_progress) if recognize is transcribe else recognize(pcm,name,adapter._zb_cancel)
                 atomic_json(file,{'words':words});candidates.append(words)
             try:verify_coverage(scenes,words);qualified.append(words);break
             except ValueError as error:q.put(('log','warning',f'{name}: {error}'))
     candidates=qualified+[w for w in candidates if all(w is not v for v in qualified)]
+    q.put(('status','Checking script coverage and repairing scene boundaries'))
     bounds,words=targeted_repair(scenes,candidates,duration,pcm,root,model,recognize,adapter._zb_cancel,
         lambda message:q.put(('log','info',message)),language)
 
@@ -101,6 +109,7 @@ def generate(adapter,q,config,recognize=None):
                 a=float(w.get('offset',w.get('start',0)));b=a+float(w.get('duration',float(w.get('end',a))-a))
                 if start/rate<=a<end/rate:local.append({'word':w.get('word',w.get('text','')),'offset':a-start/rate,'duration':max(0,min(b,end/rate)-a)})
             row.update(audio_path=str(out),audio_key=identity,audio_status='done',voice_engine='imported_audio',word_timings=local,timing_source='existing-audio-aligned',continuous_voice_key=identity)
+            q.put(('progress',85+int((i+1)/len(rows)*14)))
     atomic_json(root/'manifest.json',{'identity':identity,'source_sha256':digest,'source_audio':str(source),'duration':duration,'boundaries':bounds})
     adapter.zb_scenes=rows;adapter._zb_save_project(config)
     q.put(('log','success',f'Imported narration verified for {len(rows)} scenes. Original performance reused; no voice generation.'))
