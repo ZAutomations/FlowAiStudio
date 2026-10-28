@@ -13,7 +13,8 @@ def select_account(config, previous, cancel, log):
     """
     account=config.get('browser_account','')
     old_account=previous.get('browser_account','')
-    if account==old_account:return
+    explicit_project=bool(config.get('flow_url_override')) and bool(str(config.get('flow_url','')).strip())
+    if account==old_account and not explicit_project:return
     if not config.get('character_consistency') or config.get('provider','flow')!='flow':
         raise ValueError('Changing accounts in an existing project currently requires reference-based Flow image generation.')
     opts=browser_options({**config,'provider':'flow'})
@@ -28,12 +29,12 @@ def select_account(config, previous, cancel, log):
     def valid_output(record):return valid_video(record['output']) if record.get('kind')=='video' else valid_image(record['output'])
     if state:
         active=state.get('account_binding',{}).get('account',old_account)
-        if active==account:
+        if active==account and not (explicit_project and config.get('flow_url')!=state.get('account_binding',{}).get('flow_url')):
             binding=state['account_binding']
             config.update(browser_account=account,flow_url=binding['flow_url'],_rotation_scope=True,
                           _rotation_restored=True,_reference_flow_url=state['reference_flow_url'])
             return
-        if active!=old_account:
+        if active!=old_account and active!=account:
             raise ValueError('The project account changed since this screen was loaded. Reopen the saved project before selecting another account.')
         for record in state.get('records',[]):
             if record.get('status')=='complete' and not valid_output(record):
@@ -43,7 +44,16 @@ def select_account(config, previous, cancel, log):
     target={**config,'flow_url':'','auto_project':True,'_rotation_scope':True,'_rotation_restored':False}
     if not target.get('agent_tool_dir'):target['agent_tool_dir']=str(Path(__file__).parent/'animate_flow_backend')
     log('Selected another saved browser account. Preparing its separate Flow project; local references and completed scene images are retained.')
-    url=ensure_project(target,cancel,log)
+    supplied_url=str(config.get('flow_url','')).strip()
+    if supplied_url and (explicit_project or supplied_url!=previous.get('flow_url','')):
+        import re
+        if not re.fullmatch(r'https://flow\.google\.com/project/[a-zA-Z0-9-]+/?',supplied_url):
+            raise ValueError('Enter the selected account’s HTTPS Flow project URL. Existing project retained.')
+        url=supplied_url
+        atomic_json(root/'flow_accounts'/(account or 'default')/'flow_project.json',{'url':url,'status':'ready'})
+        log('Using the explicitly supplied Flow project for the selected account; no extra project created.')
+    else:
+        url=ensure_project(target,cancel,log)
     check_cancel(cancel)
     old_url=previous.get('flow_url','')
     reference_url=(state or {}).get('reference_flow_url') or previous.get('_reference_flow_url') or old_url

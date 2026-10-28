@@ -33,6 +33,11 @@ class JobAutomationTests(unittest.TestCase):
    self.assertIs(enabled['payload']['auto_retry'],True)
    disabled=jobs.submit('animate',{'action':'images','auto_retry':False},settings={})
    self.assertIs(disabled['payload']['auto_retry'],False)
+ def test_uncertain_submission_does_not_repeat_forever(self):
+  job={'kind':'studio','state':'failed','payload':{'action':'images'},'logs':['[ERROR] ACTION REQUIRED: Existing submission remains unresolved for scene(s) 97.']}
+  self.assertFalse(schedule_retry(job))
+  job['logs']=['[ERROR] Flow generation request failed: Something went wrong.']
+  self.assertTrue(schedule_retry(job,now=10))
  def test_stop_and_disabled_and_completed_never_retry(self):
   for patch in ({'retry_disabled':True},{'state':'stopped'},{'state':'completed'},{'payload':{'auto_retry':False}},{'payload':{'auto_retry':True,'action':'import-ready-animation'}}):
    job={'kind':'studio','state':'failed','payload':{'action':'images','auto_retry':True},**patch}

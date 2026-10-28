@@ -25,7 +25,8 @@ def ensure_project(config, cancel, log):
     if not file.exists() and config.get('_rotation_restored') and config.get('flow_url'):
         atomic_json(file,{'url':config['flow_url'],'status':'ready'})
     state = json.loads(file.read_text(encoding='utf-8')) if file.is_file() else {}
-    if state.get('url'):
+    pending_rename = state.get('status') == 'renaming' and bool(state.get('url'))
+    if state.get('url') and not pending_rename:
         log('Reusing saved Flow project: '+state['url'])
         return state['url']
     if not config.get('auto_project', True):
@@ -42,17 +43,23 @@ def ensure_project(config, cancel, log):
     if state.get('status') == 'creating':
         new = [url for url in before if url not in state.get('before', [])]
         if len(new) == 1:
-            atomic_json(file, {'url': new[0], 'status': 'ready'})
-            return new[0]
-        raise RuntimeError('Project creation was interrupted. Open its Flow project and retry; another project will not be created automatically.')
+            state = {**state, 'url': new[0], 'status': 'renaming'}
+            atomic_json(file, state)
+            pending_rename = True
+        else:
+            raise RuntimeError('Project creation was interrupted. Open its Flow project and retry; another project will not be created automatically.')
     check_cancel(cancel)
     driver = Path(config.get('agent_tool_dir') or Path(__file__).parent/'animate_flow_backend') / 'project_setup.js'
     node = shutil.which('node')
     if not driver.is_file() or not node:
         raise RuntimeError('The bundled Animate project driver and Node.js are required.')
-    atomic_json(file, {'status': 'creating', 'before': before})
-    log('Creating a new Flow project for this video…')
-    process = subprocess.Popen([node, str(driver), '--cdp', str(generator.cdp_port), '--new-tab', '--timeout', '60'], cwd=driver.parent, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace', creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    title = str(state.get('title') or config.get('title') or Path(config['project']).name).strip()
+    if not title: raise ValueError('Enter the story title before creating its Flow project.')
+    atomic_json(file, {**state, 'status': 'renaming' if pending_rename else 'creating', 'before': state.get('before', before), 'title': title})
+    log('Renaming the saved new Flow project…' if pending_rename else 'Creating a new Flow project for this video…')
+    args = [node, str(driver), '--cdp', str(generator.cdp_port), '--timeout', '60', '--title', title]
+    args += ['--project-url', state['url']] if pending_rename else ['--new-tab']
+    process = subprocess.Popen(args, cwd=driver.parent, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace', creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
     started = time.monotonic()
     try:
         while process.poll() is None:
@@ -62,10 +69,12 @@ def ensure_project(config, cancel, log):
             time.sleep(.2)
         output = process.communicate()[0]
         found = re.search(r'project_url:\s*(https://flow\.google\.com/project/[a-zA-Z0-9-]+)', output)
-        if process.returncode or not found:
+        if found:
+            atomic_json(file, {'url': found.group(1), 'status': 'renaming', 'title': title})
+        if process.returncode or not found or 'project_renamed: true' not in output:
             raise RuntimeError('Flow project creation failed: ' + output[-1200:])
         url = found.group(1)
-        atomic_json(file, {'url': url, 'status': 'ready'})
+        atomic_json(file, {'url': url, 'status': 'ready', 'title': title})
         log('Flow project saved: ' + url)
         return url
     finally:

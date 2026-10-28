@@ -184,6 +184,10 @@ def audit_missing_outputs(generator,records,config,cancel,log):
         while time.monotonic()<deadline:
             check_cancel(cancel)
             reply=generator._agent_batch_reply(page,records)
+            request_error=generator._agent_request_error(page,records)
+            if request_error:
+                atomic_json(Path(config['project'])/'agent_missing_audit.json',{'audit_id':audit_id,'requested':table,'reply':reply,'provider_error':request_error,'confirmed_missing':[]})
+                raise RuntimeError('Flow verification request failed: '+request_error+'. Saved outputs retained; no new generation submitted.')
             verified=parse_missing_audit(reply,records,audit_id)
             if verified:
                 atomic_json(Path(config['project'])/'agent_missing_audit.json',{'audit_id':audit_id,'requested':table,'reply':reply,'confirmed_missing':[r['index']+1 for r in verified]})
@@ -206,9 +210,24 @@ def explicit_missing_recovery(config):
     """Only an explicit user stage may retry a previously submitted identity."""
     return config.get('_generate_missing') is True
 
+def compact_image_records(records):
+    """Deduplicate exact shared prompt lines for transport, never change keys."""
+    if len(records)<2 or any(r.get('kind')!='image' for r in records):return records,[]
+    counts={}
+    for record in records:
+        for line in set(record['prompt'].splitlines()):
+            if len(line)>=200 and 'AS_SCENE_' not in line:counts[line]=counts.get(line,0)+1
+    shared=[line for line in records[0]['prompt'].splitlines() if counts.get(line)==len(records)]
+    shared=list(dict.fromkeys(shared))
+    if not shared:return records,[]
+    common=set(shared)
+    return [dict(r,prompt='\n'.join(line for line in r['prompt'].splitlines() if line not in common)) for r in records],shared
+
+
 def batch_prompt(records,config):
     from ai_studio_story import is_narration_story, narration_direction
     from ai_studio_visual_context import TOPIC_DIRECTION,MEANING_DIRECTION
+    records,shared_image_rules=compact_image_records(records)
     lines=['Reconcile the numbered media outputs below, reusing existing outputs and generating only confirmed missing identities. One separate asset per scene; no combined film, collage or storyboard.',
            'IMAGES: exactly ONE image per scene (x1 / number_of_images=1), never 2x, x2, x3 or x4. Override any default requesting multiple variations. No alternate versions or quality-selection variants. A batch of N scenes means N total images. Once one image for a scene exists, it is complete; do not request a second variation, including during model fallback.',
            ('Use the attached named character AND location reference image pixels in EVERY output. Preserve the same faces, clothing, colors and visual style.' if config.get('references') else 'No reference images attached. Follow each scene subject and the selected visual style; do not invent a recurring named cast or force a fixed story location.'),
@@ -219,6 +238,8 @@ def batch_prompt(records,config):
            'Videos: silent characters, no dialogue, narration, music or captions. Add subtle natural character action and camera movement. Duration exactly '+str(clip_seconds(config))+' seconds. '+'Each VIDEO output is one edited clip containing TWO distinct shots by default, THREE only when the narration genuinely needs a third visual beat, never four, with visible hard cuts timed to its narration. Follow its edit decision list below. Do not create separate outputs per shot or a simultaneous collage/storyboard.',
            'IMPORTANT: Begin each individual media generation prompt with its exact AS_SCENE tracking reference, verbatim as plain prompt text. Keep it in the saved generation prompt, not only in your chat reply or tool metadata. It is a tracking label; do not display or speak it in the media. Never omit, shorten or replace the tracking reference.',
            'Generate only this batch. Do not regenerate earlier scenes.']
+    if shared_image_rules:
+        lines.append('SHARED IMAGE RULES: apply ALL of these unchanged to EVERY numbered image request below. Include the complete shared visual style and constraints when calling the image tool for each scene. These are not extra scenes.\n'+'\n'.join(shared_image_rules))
     if any(r['kind']=='video' for r in records):
         from ai_studio_animate_options import video_settings
         quality,ratio=video_settings(config)
@@ -314,6 +335,23 @@ class AgentMedia(ZBotImageGenerator):
                 .map(r=>r.innerText||'').join('\\n');
         }""",[r['token'] for r in records])
         return text if isinstance(text,str) else ''
+
+    @staticmethod
+    def _agent_request_error(page,records):
+        """Only the latest matched request's real error card, never prompt text."""
+        result=page.evaluate("""tokens => {
+            const rows=[...document.querySelectorAll('.messages-list > .message-row')];
+            let start=-1;
+            for(let i=rows.length-1;i>=0;i--)if(rows[i].classList.contains('user-row')){
+                if(tokens.some(t=>(rows[i].innerText||'').includes(t)))start=i;
+                break;
+            }
+            if(start<0)return '';
+            return rows.slice(start+1).filter(r=>r.classList.contains('agent-row'))
+                .flatMap(r=>[...r.querySelectorAll('flow-chat-error-card')])
+                .map(c=>(c.innerText||'').trim()).filter(Boolean).join('\\n');
+        }""",[r['token'] for r in records])
+        return result.strip() if isinstance(result,str) else ''
 
     @staticmethod
     def _agent_refusal(page,records):
@@ -550,6 +588,10 @@ class AgentMedia(ZBotImageGenerator):
                     error=MissingAgentOutputs if settled or retry_unmatched else RuntimeError
                     hint=' Flow is idle and the grid scan found no matching outputs. Use Generate Missing to request these scenes only.' if settled else ' Retry collects existing outputs only; no batch resubmitted.'
                     raise error(f'Agent batch paused. Unresolved scenes: {missing}; {len(observed)} assets observed, {unlabelled} media assets without readable tracking labels. Saved outputs retained.'+hint+f' Diagnostics: {report}')
+                request_error='' if getattr(self,'available_only',False) else self._agent_request_error(page,records)
+                if request_error:
+                    atomic_json(Path(records[0]['output']).parent.parent/'agent_request_error.json',{'error':request_error,'scenes':[r['index']+1 for r in records if r['status']!='complete'],'reply':self._agent_batch_reply(page,records)})
+                    raise RuntimeError('Flow generation request failed: '+request_error+'. Submitted identities retained for recovery; this is not assumed to be quota.')
                 refusal='' if getattr(self,'available_only',False) else self._agent_refusal(page,records)
                 if not getattr(self,'available_only',False):
                     conflicts=agent_label_conflicts(self._agent_batch_reply(page,records),records)
@@ -733,6 +775,9 @@ def _prepare_agent_prompt_once(config,prompt_file,references,cancel,log):
 
 
 def generate_agent_media(scenes,config,cancel,log,on_media,reference_records=None):
+    if reference_records is None and not config.get('_recover_only') and config.get('references'):
+        from ai_studio_consistency import ensure_uploaded_reference_library
+        ensure_uploaded_reference_library(config,cancel,log)
     plan=reference_records if reference_records is not None else media_plan(scenes,config)
     file=Path(config['project'])/config.get('_manifest_name',('studio_agent_images.json' if config.get('image_agent') else 'animate_media.json'))
     identity=fingerprint([(r['key'],r['index']) for r in plan],config['flow_url'])
@@ -911,10 +956,7 @@ def generate_agent_media(scenes,config,cancel,log,on_media,reference_records=Non
             if start in recovered:raise
             missing=[r for r in target if r['status']!='complete']
             if not explicit_missing_recovery(config):
-                confirmed=audit_missing_outputs(generator,missing,batch_config,cancel,log)
-                if len(confirmed)!=len(missing):
-                    raise RuntimeError('Flow audit did not confirm every unresolved identity as absent and ready. Existing/processing/blocked/uncertain outputs retained; no duplicate batch submitted. Download existing outputs or review agent_missing_audit.json.') from error
-                log('Flow confirmed these exact scene identities are missing: '+', '.join(str(r['index']+1) for r in confirmed)+'. Only these scenes will be requested; saved images skipped.')
+                raise RuntimeError('ACTION REQUIRED: Existing submission remains unresolved for scene(s) '+', '.join(str(r['index']+1) for r in missing)+'. Existing outputs were checked without sending another audit prompt. Use Generate Missing for one reconciled request of these identities; its Agent checks existing/in-flight outputs before generating. Completed media retained.') from error
             log(str(error))
             recovered.add(start)
             for r in missing:r['status']='pending'

@@ -97,6 +97,27 @@ def generate(adapter,q,config,recover_only=False,references_only=False):
             handover(config,adapter._zb_cancel,log)
             adapter._zb_save_project(config)
 
+def ensure_uploaded_reference_library(config,cancel,log):
+    """One complete-library upload per browser/account/project/file revision."""
+    from ai_studio_pipeline import atomic_json,fingerprint,valid_image
+    from types import SimpleNamespace
+    refs=config.get('references',[])
+    if not refs:return
+    if any(not valid_image(path) for path in refs):
+        raise ValueError('Saved reference library contains missing or invalid files; scene submission has not started.')
+    identity=fingerprint(config.get('flow_url',''),config.get('browser_account',''),config.get('browser_type','chrome'),
+        [(Path(path).name,fingerprint(Path(path).read_bytes().hex())) for path in refs])
+    file=Path(config['project'])/'references/library_upload_receipts.json'
+    state=json.loads(file.read_text('utf-8')) if file.exists() else {'completed':{}}
+    if identity in state.get('completed',{}):
+        log('Complete reference library already uploaded for this account and Flow project; skipping library preparation.')
+        return
+    log('New account/project or reference revision: preparing the complete saved reference library before scene generation.')
+    upload_reference_library(SimpleNamespace(_zb_cancel=cancel),{**config,'_skip_reference_cleanup':True},log)
+    state.setdefault('completed',{})[identity]={'flow_url':config.get('flow_url',''),'account':config.get('browser_account',''),'files':[Path(p).name for p in refs]}
+    atomic_json(file,state)
+
+
 def upload_reference_library(adapter,config,log):
     project=Path(config['project'])
     if config['references']:
@@ -114,7 +135,7 @@ def upload_reference_library(adapter,config,log):
         with browser._session(headless=False) as ctx:
             page=browser._batch_page(ctx)
             from ai_studio_reference_cleanup import clean_generated_references
-            clean_generated_references(page,config,adapter._zb_cancel,log)
+            if not config.get('_skip_reference_cleanup'):clean_generated_references(page,config,adapter._zb_cancel,log)
             log(f'Uploading/reusing all {len(config["references"])} reference images on {browser.browser_label} port {browser.cdp_port}…')
             prepare_agent_prompt({**config,'_upload_references_only':True,'_agent_cdp_port':browser.cdp_port},
                                  prompt,config['references'],adapter._zb_cancel,log)

@@ -126,7 +126,19 @@ def atomic_json(path, data):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + '.tmp')
-    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding='utf-8')
+    # Flush the new contents to disk before publishing the checkpoint.
+    with tmp.open('w',encoding='utf-8') as stream:
+        json.dump(data,stream,indent=2,ensure_ascii=False)
+        stream.flush();os.fsync(stream.fileno())
+    # Keep the last parseable checkpoint; never replace it with corrupt bytes.
+    if path.is_file():
+        previous=path.read_bytes()
+        try:json.loads(previous)
+        except (ValueError,UnicodeError):pass
+        else:
+            backup=path.with_suffix(path.suffix+'.bak')
+            with backup.open('wb') as stream:
+                stream.write(previous);stream.flush();os.fsync(stream.fileno())
     # Windows readers (UI polling/preview or antivirus) can briefly hold a
     # handle that denies replacement. Keep the old checkpoint until it clears.
     for attempt in range(8):
@@ -530,7 +542,7 @@ def render_video(scenes, project, options, cancel=None, progress=None, log=None)
         args += ['-i', sfx]
         graph = graph.replace('[a]', '[baseaudio]') + f';[baseaudio][{sfx_index}:a]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95[a]'
     args += ['-filter_complex', graph, '-map', '0:v', '-map', '[a]']
-    want_captions = options.get('captions', True)
+    want_captions = options.get('captions', True) and options.get('use_captions_tab', True)
     if options.get('use_captions_tab'):
         want_captions = want_captions and captions_enabled(settings)
     if want_captions:

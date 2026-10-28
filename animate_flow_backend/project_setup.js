@@ -186,6 +186,44 @@ async function setInstructions(page, text) {
     }
 }
 
+async function renameProject(page, title) {
+    title = String(title || '').trim();
+    if (!title) throw Error('Story title is required to rename the new Flow project.');
+    const visible = el => !!(el.getBoundingClientRect().width && el.getBoundingClientRect().height);
+    // Scope to the project menu: never open an asset or global settings menu.
+    await page.waitForFunction(() => [...document.querySelectorAll('button')].some(el =>
+        /more options for the project/i.test(el.getAttribute('aria-label') || '') && el.getBoundingClientRect().width), {timeout: 30000});
+    const menu = await page.$('button[aria-label="More options for the project"]');
+    if (!menu) throw Error('Project options button not found; rename stopped.');
+    await menu.click();
+    await page.waitForFunction(() => [...document.querySelectorAll('[role="menuitem"],button,.label')].some(el =>
+        el.textContent.trim() === 'Rename' && el.getBoundingClientRect().width), {timeout: 10000});
+    await page.evaluate(() => {
+        const el = [...document.querySelectorAll('[role="menuitem"],button,.label')].find(el =>
+            el.textContent.trim() === 'Rename' && el.getBoundingClientRect().width);
+        el.click();
+    });
+    const input = await page.waitForFunction(() => {
+        const dialog = document.querySelector('[role="dialog"],mat-dialog-container');
+        const fields = [...(dialog || document).querySelectorAll('input:not([type="hidden"]),textarea')]
+            .filter(el => el.getBoundingClientRect().width && !/search/i.test(el.getAttribute('placeholder') || ''));
+        return fields.find(el => el === document.activeElement) || (dialog && fields[0]) || false;
+    }, {timeout: 10000});
+    await input.asElement().click({clickCount: 3});
+    await page.keyboard.down('Control'); await page.keyboard.press('A'); await page.keyboard.up('Control');
+    await page.keyboard.insertText(title);
+    await page.keyboard.press('Enter');
+    // Verify committed header text, not merely the text entered in a dialog.
+    await page.waitForFunction(expected => {
+        const dialog = document.querySelector('[role="dialog"],mat-dialog-container');
+        if (dialog && dialog.getBoundingClientRect().width) return false;
+        return [...document.querySelectorAll('h1,h2,[role="heading"],nav input,header input,nav [title],header [title]')]
+            .some(el => el.getBoundingClientRect().width && (el.value || el.textContent || el.title || '').trim() === expected);
+    }, {timeout: 15000}, title);
+    console.log('project_renamed: true');
+    log('Flow project renamed to story title: ' + title);
+}
+
 if (require.main === module) (async () => {
     let browser;
     try {
@@ -198,6 +236,16 @@ if (require.main === module) (async () => {
         process.exit(1);
     }
 
+    const resumeUrl = flag('--project-url');
+    if (resumeUrl && !/^https:\/\/flow\.google\.com\/project\/[a-zA-Z0-9-]+$/.test(resumeUrl)) throw Error('Invalid project URL.');
+    if (resumeUrl) {
+        let target = (await browser.pages()).find(p => p.url().split('?')[0] === resumeUrl);
+        if (!target) { target = await browser.newPage(); await target.goto(resumeUrl, {waitUntil: 'domcontentloaded', timeout: 60000}); }
+        console.log('project_url: ' + resumeUrl);
+        await renameProject(target, flag('--title'));
+        await browser.disconnect();
+        return;
+    }
     let page = process.argv.includes('--new-tab') ? await browser.newPage() : await flowPage(browser);
     if (!page) {
         log('No Flow tab found - opening one.');
@@ -248,6 +296,8 @@ if (require.main === module) (async () => {
         process.exit(3);
     }
     page = found.page;
+    console.log(`project_url: ${found.url}`);
+    if (flag('--title')) await renameProject(page, flag('--title'));
 
     if (INSTRUCTIONS_FILE) {
         let text = '';
@@ -273,4 +323,4 @@ async function createProject(browser, page) {
     if (!found) throw Error('Timed out waiting for the new Flow project.');
     return found;
 }
-module.exports = { projectIdFromUrl, chooseNewProject, NEW_PROJECT_RX, createProject };
+module.exports = { projectIdFromUrl, chooseNewProject, NEW_PROJECT_RX, createProject, renameProject };

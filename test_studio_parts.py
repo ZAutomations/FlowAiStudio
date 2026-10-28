@@ -52,6 +52,13 @@ class PartTests(unittest.TestCase):
         self.assertTrue(all(Path(s['image_path']).is_file() for s in child['scenes']))
         self.assertTrue(Path(result['video']).is_file())
 
+    def test_caption_checkbox_off_overrides_global_pro_captions(self):
+        self.config.update(captions=True,use_captions_tab=False)
+        self.config['settings']['clipper_captions_enabled']=True
+        result=compile_part(self.adapter,self.q,self.config)
+        timeline=json.loads((Path(result['project']).parent/'timeline.json').read_text('utf-8'))
+        self.assertFalse(timeline['captions_burned'])
+
     def test_missing_image_blocks_part_without_skipping_or_voice_calls(self):
         Path(self.scenes[1]['image_path']).unlink()
         self.adapter._zb_voice_pass=Mock()

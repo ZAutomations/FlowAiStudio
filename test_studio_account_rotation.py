@@ -76,6 +76,31 @@ class AccountRotationTests(unittest.TestCase):
         with patch('ai_studio_animate_setup.ensure_project') as project:
             select_account(selected,self.config,threading.Event(),lambda m:None)
             project.assert_not_called()
+    def test_manual_account_uses_supplied_project_without_creating_another(self):
+        (self.root/'profile_gemini').mkdir()
+        selected={**self.config,'browser_account':self.account,'character_consistency':True,'flow_url':'https://flow.google.com/project/user-created'}
+        with patch('ai_studio_animate_setup.ensure_project') as create:
+            select_account(selected,self.config,threading.Event(),lambda m:None)
+            create.assert_not_called()
+        self.assertEqual(self.read()['account_binding']['flow_url'],selected['flow_url'])
+        self.assertEqual(Path(self.records[0]['output']).read_bytes(),self.original)
+        self.assertEqual(self.read()['records'][1]['status'],'pending')
+        self.assertEqual(json.loads((self.root/'flow_accounts'/self.account/'flow_project.json').read_text())['url'],selected['flow_url'])
+
+    def test_explicit_url_overrides_already_bound_same_account(self):
+        (self.root/'profile_gemini').mkdir()
+        self.state.update(account_binding={'account':self.account,'flow_url':'https://flow.google.com/project/auto-created'},reference_flow_url=self.config['flow_url'])
+        atomic_json(self.file,self.state)
+        previous={**self.config,'browser_account':self.account,'flow_url':'https://flow.google.com/project/auto-created','character_consistency':True}
+        selected={**previous,'flow_url':'https://flow.google.com/project/manual-uploaded','flow_url_override':True}
+        with patch('ai_studio_animate_setup.ensure_project') as create:
+            select_account(selected,previous,threading.Event(),lambda m:None)
+            create.assert_not_called()
+        self.assertEqual(self.read()['account_binding']['flow_url'],selected['flow_url'])
+        self.assertEqual(Path(self.records[0]['output']).read_bytes(),self.original)
+        restored=dict(selected);restore(restored)
+        self.assertEqual(restored['flow_url'],'https://flow.google.com/project/manual-uploaded')
+
     def test_manual_selection_works_before_any_scene_batch_exists(self):
         self.file.unlink();(self.root/'profile_gemini').mkdir()
         selected={**self.config,'browser_account':self.account,'character_consistency':True}
